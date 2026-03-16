@@ -8,7 +8,7 @@ import re
 import yfinance as yf
 
 # Configuração da Página
-st.set_page_config(page_title="GEX ULTRA ELITE", layout="centered")
+st.set_page_config(page_title="GEX ULTRA ELITE", layout="wide")
 
 def calcGammaEx(S, K, vol, T, r, q, optType, OI):
     K, vol, T, OI = map(lambda x: np.asarray(x, dtype=float), [K, vol, T, OI])
@@ -37,8 +37,8 @@ def fetch_json(symbol="SPX"):
         except: continue
     raise Exception("Falha ao conectar com a CBOE.")
 
-st.title("🎯 GEX ULTRA ELITE - Painel")
-st.write("Abra este link diariamente às 10:00 para as taxas do dia.")
+st.title("🎯 GEX ULTRA ELITE - Painel Operacional")
+st.write("Clique no ícone à direita de cada valor para copiar rapidamente.")
 
 if st.button("🚀 GERAR TAXAS ATUALIZADAS"):
     with st.spinner("Buscando dados na CBOE..."):
@@ -97,22 +97,39 @@ if st.button("🚀 GERAR TAXAS ATUALIZADAS"):
             def fmt(val, is_zg=False):
                 if pd.isna(val): return "0.00"
                 adj = val + basis
-                return f"{round(adj * 4) / 4:.2f}" if is_zg else f"{round(adj / 5) * 5:.2f}"
+                return f"{round(adj * 4) / 4:.2f}" if is_zg else f"{round(adj / 5) * 5:.0f}"
 
             st.divider()
+            
+            # Interface com botões de cópia
             c1_col, c2_col = st.columns(2)
             
             with c1_col:
-                st.metric("CALL WALL", fmt(c_wall))
-                st.metric("ZERO GAMA", fmt(z_gama, True))
-                st.metric("PUT WALL", fmt(p_wall))
-            
-            with c2_col:
-                st.metric("NÍVEL L1", fmt(l1))
-                st.metric("NÍVEL C1", fmt(c1))
-                st.metric("NÍVEL C4", fmt(c4))
-                st.metric("VOL TRIGGER", fmt(vt))
+                st.subheader("🛡️ Defesas Principais")
+                st.write("**CALL WALL (VENDER)**")
+                st.code(fmt(c_wall), language="text")
+                
+                st.write("**ZERO GAMA (FLIP)**")
+                st.code(fmt(z_gama, True), language="text")
+                
+                st.write("**PUT WALL (COMPRAR)**")
+                st.code(fmt(p_wall), language="text")
 
+            with c2_col:
+                st.subheader("📊 Níveis de Fluxo")
+                st.write("**VOL TRIGGER**")
+                st.code(fmt(vt), language="text")
+                
+                st.write("**NÍVEL L1**")
+                st.code(fmt(l1), language="text")
+                
+                st.write("**NÍVEL C1**")
+                st.code(fmt(c1), language="text")
+                
+                st.write("**NÍVEL C4**")
+                st.code(fmt(c4), language="text")
+
+            st.divider()
             st.info(f"Basis (ES-SPX): {basis:.2f} | Spot: {spotPrice:.2f}")
 
         except Exception as e:
