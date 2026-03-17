@@ -482,7 +482,7 @@ def render_gamma_profile(df_chart, spot_price, zero_gamma, call_wall, put_wall):
     
     chart = (bars + rules + labels).properties(
         height=500, title=alt.TitleParams("📊 GAMMA PROFILE: Concentração de Liquidez (Ajustado p/ ES)", 
-                                         fontSize=16, color='#FFFFFF', anchor='middle', fontWeight='700')
+                                         fontSize=16, color='#FFFFFF', anchor='middle', fontWeight='bold')
     ).configure_view(strokeWidth=0).configure_axis(grid=True, gridColor='#2b313f').configure_title(fontSize=16, color='#FFFFFF')
     st.altair_chart(chart, use_container_width=True)
 
