@@ -300,6 +300,10 @@ def generate_trade_report(signal, levels, spot, basis, timestamp):
     confidence = '🟢 Alta' if signal['confidence']>=3 else '🟡 Média' if signal['confidence']==2 else '🔴 Baixa'
     es_spot = spot + basis
     
+    # Correção da formatação das strings condicionais
+    stop_loss_str = f"{signal['invalidation']:.2f}" if signal['invalidation'] else 'N/A'
+    alvo_str = f"{signal['targets'][0]:.2f}" if signal['targets'] else 'N/A'
+    
     report = f"""# ⚡ GEX ULTRA ELITE - Trade Report
 *Gerado em: {timestamp.strftime('%d/%m/%Y %H:%M ET')} | ES (Futuro): {es_spot:.2f} (Basis: {basis:+.2f})*
 
@@ -321,8 +325,8 @@ def generate_trade_report(signal, levels, spot, basis, timestamp):
 {chr(10).join(f'- {r}' for r in signal['reasoning'])}
 
 ## ⚠️ Gestão de Risco
-- Stop Loss Institucional: {signal['invalidation']:.2f if signal['invalidation'] else 'N/A'}
-- Alvo Primário (Take Profit): {signal['targets'][0]:.2f if signal['targets'] else 'N/A'}
+- Stop Loss Institucional: {stop_loss_str}
+- Alvo Primário (Take Profit): {alvo_str}
 - Payoff (R:R Estimado): {signal['risk_reward']:.2f}
 
 ## 📊 Estrutura de Volatilidade
