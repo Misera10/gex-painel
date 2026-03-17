@@ -12,8 +12,8 @@ st.set_page_config(page_title="GEX ULTRA ELITE", layout="wide")
 st.markdown("""
     <style>
     .stApp { background-color: #0b0e14; }
-    div[data-testid="stMetricValue"], code { color: #00FFAA !important; font-family: 'Courier New', monospace; font-size: 20px;}
-    p { color: #8A94A6; font-weight: bold; margin-bottom: 2px;}
+    code { color: #00FFAA !important; font-family: 'Courier New', monospace; font-size: 34px !important; font-weight: 900 !important; padding: 15px !important; display: block; text-align: center; border-radius: 8px; background-color: #161a25 !important; border: 1px solid #2b313f;}
+    p { color: #8A94A6; font-weight: bold; margin-bottom: 2px; font-size: 15px;}
     .titulo { text-align: center; color: #FFFFFF; font-family: 'Arial', sans-serif; font-weight: 800; padding-bottom: 20px;}
     hr { border-color: #2b313f; margin-top: 10px; margin-bottom: 20px;}
     </style>
@@ -140,9 +140,11 @@ if st.button("INICIAR EXTRAÇÃO AUTOMÁTICA"):
             st.markdown("<h4 style='color:#FFF;'>⏱️ MURALHAS 0DTE (Microestrutura)</h4>", unsafe_allow_html=True)
             c0_col, p0_col = st.columns(2)
             with c0_col:
-                st.write("CALL WALL 0DTE (Resistência Intraday)"); st.code(fmt(c_wall_0dte))
+                st.write("CALL WALL 0DTE (Resistência Intraday)")
+                st.code(fmt(c_wall_0dte))
             with p0_col:
-                st.write("PUT WALL 0DTE (Suporte Intraday)"); st.code(fmt(p_wall_0dte))
+                st.write("PUT WALL 0DTE (Suporte Intraday)")
+                st.code(fmt(p_wall_0dte))
             
             st.markdown("<hr>", unsafe_allow_html=True)
             
@@ -150,13 +152,20 @@ if st.button("INICIAR EXTRAÇÃO AUTOMÁTICA"):
             st.markdown("<h4 style='color:#FFF;'>🛡️ NÍVEIS MACRO E FLUXO (Estrutural)</h4>", unsafe_allow_html=True)
             c1_col, c2_col = st.columns(2)
             with c1_col:
-                st.write("CALL WALL PRINCIPAL"); st.code(fmt(c_wall))
-                st.write("ZERO GAMA (FLIP)"); st.code(fmt(z_gama, True))
-                st.write("PUT WALL PRINCIPAL"); st.code(fmt(p_wall))
-                st.write("VOL TRIGGER"); st.code(fmt(vt))
+                st.write("CALL WALL PRINCIPAL")
+                st.code(fmt(c_wall))
+                st.write("ZERO GAMA (FLIP)")
+                st.code(fmt(z_gama, True))
+                st.write("PUT WALL PRINCIPAL")
+                st.code(fmt(p_wall))
+                st.write("VOL TRIGGER")
+                st.code(fmt(vt))
             with c2_col:
-                st.write("NÍVEL L1 (Alvo Alto)"); st.code(fmt(l1))
-                st.write("NÍVEL C1 (Alvo Baixo)"); st.code(fmt(c1))
-                st.write("NÍVEL C4 (Exaustão Extrema)"); st.code(fmt(c4))
+                st.write("NÍVEL L1 (Alvo Alto)")
+                st.code(fmt(l1))
+                st.write("NÍVEL C1 (Alvo Baixo)")
+                st.code(fmt(c1))
+                st.write("NÍVEL C4 (Exaustão Extrema)")
+                st.code(fmt(c4))
 
         except Exception as e: st.error(f"Erro de processamento: {e}")
