@@ -93,4 +93,70 @@ if st.button("INICIAR EXTRAÇÃO AUTOMÁTICA"):
             # Cálculo Basis ES
             try: es_spot = float(yf.Ticker("ES=F").history(period="1d")["Close"].iloc[-1])
             except: es_spot = spotPrice
-            basis = es_spot - spot
+            basis = es_spot - spotPrice
+
+            # Zero Gama e Níveis Intermediários
+            df["daysTillExp"] = np.where(df["ExpirationDate"].dt.date == datetime.now().date(), 1/262, np.busday_count(datetime.now().date(), df["ExpirationDate"].dt.date.values.astype('datetime64[D]')) / 262)
+            df_calc = df[df['daysTillExp'] > 0]
+            levels = np.arange(np.floor(spotPrice * 0.8 / 5) * 5, np.ceil(spotPrice * 1.2 / 5) * 5 + 5, 5.0)
+            
+            totalGamma = []
+            for level in levels:
+                cg = calcGammaEx(level, df_calc['StrikePrice'], df_calc['CallIV'].replace(0,0.15), df_calc['daysTillExp'], 0, 0, "call", df_calc['CallOpenInt'])
+                pg = calcGammaEx(level, df_calc['StrikePrice'], df_calc['PutIV'].replace(0,0.15), df_calc['daysTillExp'], 0, 0, "put", df_calc['PutOpenInt'])
+                totalGamma.append((cg - pg).sum() / 1e9)
+            
+            zeroCrossIdx = np.where(np.diff(np.sign(totalGamma)) != 0)[0]
+            z_gama = float(levels[zeroCrossIdx[0]] - totalGamma[zeroCrossIdx[0]] * (levels[zeroCrossIdx[0] + 1] - levels[zeroCrossIdx[0]]) / (totalGamma[zeroCrossIdx[0] + 1] - totalGamma[zeroCrossIdx[0]])) if len(zeroCrossIdx) > 0 else np.nan
+            
+            # Recálculo de L1, C1, C4 e VT
+            df_filt = dfAgg[(dfAgg.index >= spotPrice * 0.8) & (dfAgg.index <= spotPrice * 1.2)]
+            top_calls = df_filt['TotalGamma'].nlargest(3).index.tolist()
+            l1 = top_calls[1] if (len(top_calls) > 1 and top_calls[0] == c_wall) else (top_calls[0] if len(top_calls)>0 else np.nan)
+            c1 = df_filt[df_filt.index > p_wall]['TotalGamma'].idxmin() if not df_filt[df_filt.index > p_wall].empty else np.nan
+            c4 = df_filt[df_filt.index < p_wall]['TotalGamma'].idxmin() if not df_filt[df_filt.index < p_wall].empty else np.nan
+            vt = df_filt[(df_filt.index > p_wall) & (df_filt.index < z_gama)]['TotalGamma'].idxmin() if not df_filt[(df_filt.index > p_wall) & (df_filt.index < z_gama)].empty else np.nan
+
+            def fmt(val, is_zg=False):
+                if pd.isna(val): return "0.00"
+                adj = val + basis
+                return f"{round(adj * 4) / 4:.2f}" if is_zg else f"{round(adj / 5) * 5:.0f}"
+
+            regime_gama = "POSITIVO" if spotPrice > z_gama else "NEGATIVO"
+            cor_gama = "#00FFAA" if spotPrice > z_gama else "#FF4444"
+
+            # Interface de Usuário
+            st.markdown(f"""
+            <div style='background-color:#1E222D; padding:20px; border-radius:10px; border-left: 5px solid {cor_gama}; margin-bottom: 25px;'>
+                <h3 style='margin:0; color:white; font-family: Arial;'>REGIME GEX: <span style='color:{cor_gama}'>{regime_gama}</span></h3>
+                <p style='margin:10px 0 0 0; color:#8A94A6; font-size: 16px;'>
+                    VIX SPOT: <b style='color:#FFF;'>{vix_spot:.2f}</b> | {trend_vix}<br>
+                    ESTRATÉGIA DO DIA: <b style='color:#FFF;'>{regime_vix}</b>
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Bloco 0DTE
+            st.markdown("<h4 style='color:#FFF;'>⏱️ MURALHAS 0DTE (Microestrutura)</h4>", unsafe_allow_html=True)
+            c0_col, p0_col = st.columns(2)
+            with c0_col:
+                st.write("CALL WALL 0DTE (Resistência Intraday)"); st.code(fmt(c_wall_0dte))
+            with p0_col:
+                st.write("PUT WALL 0DTE (Suporte Intraday)"); st.code(fmt(p_wall_0dte))
+            
+            st.markdown("<hr>", unsafe_allow_html=True)
+            
+            # Bloco Macro e Níveis de Fluxo
+            st.markdown("<h4 style='color:#FFF;'>🛡️ NÍVEIS MACRO E FLUXO (Estrutural)</h4>", unsafe_allow_html=True)
+            c1_col, c2_col = st.columns(2)
+            with c1_col:
+                st.write("CALL WALL PRINCIPAL"); st.code(fmt(c_wall))
+                st.write("ZERO GAMA (FLIP)"); st.code(fmt(z_gama, True))
+                st.write("PUT WALL PRINCIPAL"); st.code(fmt(p_wall))
+                st.write("VOL TRIGGER"); st.code(fmt(vt))
+            with c2_col:
+                st.write("NÍVEL L1 (Alvo Alto)"); st.code(fmt(l1))
+                st.write("NÍVEL C1 (Alvo Baixo)"); st.code(fmt(c1))
+                st.write("NÍVEL C4 (Exaustão Extrema)"); st.code(fmt(c4))
+
+        except Exception as e: st.error(f"Erro de processamento: {e}")
