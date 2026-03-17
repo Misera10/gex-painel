@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import requests
 import re
 import yfinance as yf
+import altair as alt
 
 # Configuração e Injeção de CSS Institucional
 st.set_page_config(page_title="GEX ULTRA ELITE", layout="wide")
@@ -17,6 +18,9 @@ st.markdown("""
     .titulo { text-align: center; color: #FFFFFF; font-family: 'Arial', sans-serif; font-weight: 800; padding-bottom: 20px;}
     hr { border-color: #2b313f; margin-top: 10px; margin-bottom: 20px;}
     .destaque { color: #FFF; font-weight: bold; }
+    .semaforo-verde { background-color: #003311; border-left: 5px solid #00FFAA; padding: 15px; border-radius: 5px; color: #00FFAA; font-weight: bold; font-size: 18px; margin-top: 10px; }
+    .semaforo-vermelho { background-color: #330000; border-left: 5px solid #FF4444; padding: 15px; border-radius: 5px; color: #FF4444; font-weight: bold; font-size: 18px; margin-top: 10px; }
+    .semaforo-alerta { background-color: #332b00; border-left: 5px solid #FFCC00; padding: 15px; border-radius: 5px; color: #FFCC00; font-weight: bold; font-size: 18px; margin-top: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -50,12 +54,12 @@ def fetch_json(symbol="SPX"):
 st.markdown("<h1 class='titulo'>⚡ GEX ULTRA ELITE TERMINAL</h1>", unsafe_allow_html=True)
 
 if st.button("INICIAR EXTRAÇÃO AUTOMÁTICA"):
-    with st.spinner("Processando GEX, VIX Term Structure e 0DTE..."):
+    with st.spinner("Processando GEX, VIX Term Structure, 0DTE e Perfil de Volume..."):
         try:
             data = fetch_json("SPX")
             spotPrice = data["data"].get("current_price", data["data"].get("last"))
             
-            # Extração VIX e VIX9D (Term Structure)
+            # Extração VIX e VIX9D
             vix_spot = float(yf.Ticker("^VIX").history(period="1d")["Close"].iloc[-1])
             vix9d_spot = float(yf.Ticker("^VIX9D").history(period="1d")["Close"].iloc[-1])
             vix_hist = yf.Ticker("^VIX").history(period="1mo")["Close"]
@@ -64,7 +68,7 @@ if st.button("INICIAR EXTRAÇÃO AUTOMÁTICA"):
             trend_vix = f"⬆️ Acima da média ({vix_avg:.2f})" if vix_spot > vix_avg else f"⬇️ Abaixo da média ({vix_avg:.2f})"
             
             if vix9d_spot > vix_spot:
-                term_structure = f"🔴 INVERTIDA (VIX9D {vix9d_spot:.2f} > VIX {vix_spot:.2f}) - ALERTA DE ESTRESSE"
+                term_structure = f"🔴 INVERTIDA (VIX9D {vix9d_spot:.2f} > VIX {vix_spot:.2f}) - BACKWARDATION"
             else:
                 term_structure = f"🟢 NORMAL (VIX9D {vix9d_spot:.2f} < VIX {vix_spot:.2f}) - CONTANGO"
 
@@ -72,7 +76,7 @@ if st.button("INICIAR EXTRAÇÃO AUTOMÁTICA"):
             elif vix_spot <= 20: regime_vix = "DIRECIONAL (Operar Pullbacks)"
             else: regime_vix = "ROMPIMENTO / PERIGO (Operar a favor do Fluxo)"
 
-            # Relógio de Expiração 0DTE (Fuso de NY)
+            # Relógio de Expiração 0DTE (Fuso NY)
             now_et = pd.Timestamp.now('US/Eastern')
             close_et = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
             if now_et > close_et:
@@ -143,9 +147,30 @@ if st.button("INICIAR EXTRAÇÃO AUTOMÁTICA"):
             regime_gama = "POSITIVO" if spotPrice > z_gama else "NEGATIVO"
             cor_gama = "#00FFAA" if spotPrice > z_gama else "#FF4444"
 
-            # Interface de Usuário Atualizada
+            # -----------------------------------------------------------------
+            # ALGORITMO DE VALIDAÇÃO TÁTICA (Semáforo)
+            # -----------------------------------------------------------------
+            alvo_pontos = spotPrice * 0.005 # Alvo alvo de aprox 0.5%
+            dist_p_wall = abs(spotPrice - (p_wall_0dte if not pd.isna(p_wall_0dte) else p_wall))
+            dist_c_wall = abs(spotPrice - (c_wall_0dte if not pd.isna(c_wall_0dte) else c_wall))
+            dist_zg = abs(spotPrice - z_gama)
+
+            if regime_gama == "NEGATIVO":
+                if dist_p_wall < alvo_pontos:
+                    status_setup = f"<div class='semaforo-vermelho'>🔴 SETUP BLOQUEADO: Suporte Institucional (Put Wall) muito próximo ({dist_p_wall:.0f} pts). Risco alto de repique.</div>"
+                else:
+                    status_setup = f"<div class='semaforo-verde'>🟢 SETUP LIVRE: Espaço direcional confirmado. Próxima parede vendedora a {dist_p_wall:.0f} pts.</div>"
+            else: # Regime Positivo
+                if dist_c_wall < alvo_pontos:
+                    status_setup = f"<div class='semaforo-vermelho'>🔴 SETUP BLOQUEADO: Resistência Institucional (Call Wall) muito próxima ({dist_c_wall:.0f} pts).</div>"
+                elif dist_zg < alvo_pontos:
+                    status_setup = f"<div class='semaforo-verde'>🟢 SETUP LIVRE: Zero Gama atuando como Ímã magnético a {dist_zg:.0f} pts acima.</div>"
+                else:
+                    status_setup = f"<div class='semaforo-alerta'>🟡 ATENÇÃO: Mercado contido. Distância para resistência atual: {dist_c_wall:.0f} pts.</div>"
+
+            # Interface Principal
             st.markdown(f"""
-            <div style='background-color:#1E222D; padding:20px; border-radius:10px; border-left: 5px solid {cor_gama}; margin-bottom: 25px;'>
+            <div style='background-color:#1E222D; padding:20px; border-radius:10px; border-left: 5px solid {cor_gama}; margin-bottom: 15px;'>
                 <h3 style='margin:0; color:white; font-family: Arial;'>REGIME GEX: <span style='color:{cor_gama}'>{regime_gama}</span></h3>
                 <hr style='border-color:#2b313f; margin:10px 0;'>
                 <p style='margin:5px 0; color:#8A94A6; font-size: 16px;'>ESTRATÉGIA DO DIA: <span class='destaque'>{regime_vix}</span></p>
@@ -153,8 +178,12 @@ if st.button("INICIAR EXTRAÇÃO AUTOMÁTICA"):
                 <p style='margin:5px 0; color:#8A94A6; font-size: 16px;'>TEMPO DE EXPIRAÇÃO 0DTE: <span class='destaque' style='color:#E2B714;'>⏱️ {timer_0dte}</span></p>
             </div>
             """, unsafe_allow_html=True)
+
+            # Injeção do Semáforo
+            st.markdown(status_setup, unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
             
-            st.markdown("<h4 style='color:#FFF;'>⏱️ MURALHAS 0DTE (Microestrutura)</h4>", unsafe_allow_html=True)
+            # Blocos Numéricos
             c0_col, p0_col = st.columns(2)
             with c0_col:
                 st.write("CALL WALL 0DTE (Resistência Intraday)")
@@ -165,7 +194,6 @@ if st.button("INICIAR EXTRAÇÃO AUTOMÁTICA"):
             
             st.markdown("<hr>", unsafe_allow_html=True)
             
-            st.markdown("<h4 style='color:#FFF;'>🛡️ NÍVEIS MACRO E FLUXO (Estrutural)</h4>", unsafe_allow_html=True)
             c1_col, c2_col = st.columns(2)
             with c1_col:
                 st.write("CALL WALL PRINCIPAL")
@@ -183,5 +211,27 @@ if st.button("INICIAR EXTRAÇÃO AUTOMÁTICA"):
                 st.code(fmt(c1))
                 st.write("NÍVEL C4 (Exaustão Extrema)")
                 st.code(fmt(c4))
+
+            st.markdown("<hr>", unsafe_allow_html=True)
+
+            # -----------------------------------------------------------------
+            # GAMMA PROFILE CHART (Gráfico Institucional)
+            # -----------------------------------------------------------------
+            st.markdown("<h4 style='color:#FFF; text-align:center;'>📊 GAMMA PROFILE (Net GEX por Strike)</h4>", unsafe_allow_html=True)
+            
+            # Filtra strikes próximos para visualização limpa (+- 5%)
+            df_chart = dfAgg[(dfAgg.index >= spotPrice * 0.95) & (dfAgg.index <= spotPrice * 1.05)].copy()
+            df_chart = df_chart.reset_index()
+            df_chart['StrikePrice'] = df_chart['StrikePrice'].apply(lambda x: x + basis) # Ajuste ES
+            df_chart['Cor'] = np.where(df_chart['TotalGamma'] >= 0, '#00FFAA', '#FF4444')
+
+            grafico = alt.Chart(df_chart).mark_bar(opacity=0.85).encode(
+                y=alt.Y('StrikePrice:O', sort='descending', title='Preço (Strike)', axis=alt.Axis(labelColor='#8A94A6', titleColor='#8A94A6')),
+                x=alt.X('TotalGamma:Q', title='Net GEX (Bilhão $)', axis=alt.Axis(labelColor='#8A94A6', titleColor='#8A94A6')),
+                color=alt.Color('Cor:N', scale=None),
+                tooltip=[alt.Tooltip('StrikePrice:Q', title='Strike'), alt.Tooltip('TotalGamma:Q', title='GEX', format='.2f')]
+            ).properties(height=500).configure_view(strokeWidth=0).configure_axis(gridColor='#2b313f')
+
+            st.altair_chart(grafico, use_container_width=True)
 
         except Exception as e: st.error(f"Erro de processamento: {e}")
