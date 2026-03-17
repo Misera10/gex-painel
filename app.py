@@ -15,6 +15,7 @@ st.markdown("""
     div[data-testid="stMetricValue"], code { color: #00FFAA !important; font-family: 'Courier New', monospace; font-size: 20px;}
     p { color: #8A94A6; font-weight: bold; margin-bottom: 2px;}
     .titulo { text-align: center; color: #FFFFFF; font-family: 'Arial', sans-serif; font-weight: 800; padding-bottom: 20px;}
+    hr { border-color: #2b313f; margin-top: 10px; margin-bottom: 20px;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -48,25 +49,22 @@ def fetch_json(symbol="SPX"):
 st.markdown("<h1 class='titulo'>⚡ GEX ULTRA ELITE TERMINAL</h1>", unsafe_allow_html=True)
 
 if st.button("INICIAR EXTRAÇÃO AUTOMÁTICA"):
-    with st.spinner("Sincronizando dados institucionais (CBOE & VIX)..."):
+    with st.spinner("Sincronizando dados institucionais (CBOE, VIX & 0DTE)..."):
         try:
             data = fetch_json("SPX")
             spotPrice = data["data"].get("current_price", data["data"].get("last"))
             
-            # Extração Automática do VIX (Histórico 1 Mês)
+            # Extração VIX
             vix_hist = yf.Ticker("^VIX").history(period="1mo")["Close"]
             vix_spot = float(vix_hist.iloc[-1])
             vix_avg = float(vix_hist.mean())
             
-            if vix_spot > vix_avg: 
-                trend_vix = f"⬆️ Acima da média ({vix_avg:.2f}) - Risco Crescente"
-            else: 
-                trend_vix = f"⬇️ Abaixo da média ({vix_avg:.2f}) - Mercado Controlado"
-
+            trend_vix = f"⬆️ Acima da média ({vix_avg:.2f})" if vix_spot > vix_avg else f"⬇️ Abaixo da média ({vix_avg:.2f})"
             if vix_spot < 16: regime_vix = "REVERSÃO À MÉDIA (Operar Exaustão)"
             elif vix_spot <= 20: regime_vix = "DIRECIONAL (Operar Pullbacks)"
             else: regime_vix = "ROMPIMENTO / PERIGO (Operar a favor do Fluxo)"
 
+            # Processamento CBOE
             df_raw = pd.DataFrame(data["data"]["options"])
             parsed = df_raw["option"].apply(lambda x: re.search(r'^(.*?)(\d{6})([CP])(\d{8})$', x))
             df_raw["ExpirationDate"] = pd.to_datetime(parsed.apply(lambda m: m.group(2) if m else None), format="%y%m%d") + timedelta(hours=16)
@@ -79,15 +77,25 @@ if st.button("INICIAR EXTRAÇÃO AUTOMÁTICA"):
             
             df = pd.merge(calls[["ExpirationDate", "StrikePrice", "CallIV", "CallGamma", "CallOpenInt"]], puts[["ExpirationDate", "StrikePrice", "PutIV", "PutGamma", "PutOpenInt"]], on=["ExpirationDate", "StrikePrice"], how="outer").fillna(0)
             df['TotalGamma'] = ((df['CallGamma'] * df['CallOpenInt'] * 100 * spotPrice**2 * 0.01) - (df['PutGamma'] * df['PutOpenInt'] * 100 * spotPrice**2 * 0.01)) / 1e9
+            
+            # Cálculo Macro (Todos os Vencimentos)
             dfAgg = df.groupby(['StrikePrice']).sum(numeric_only=True)
-            
-            try: es_spot = float(yf.Ticker("ES=F").history(period="1d")["Close"].iloc[-1])
-            except: es_spot = spotPrice
-            basis = es_spot - spotPrice
-            
             c_wall = dfAgg['TotalGamma'].idxmax()
             p_wall = dfAgg['TotalGamma'].idxmin()
 
+            # --- CÁLCULO MICRO (0DTE) ---
+            min_exp = df['ExpirationDate'].min()
+            df_0dte = df[df['ExpirationDate'] == min_exp]
+            dfAgg_0dte = df_0dte.groupby(['StrikePrice']).sum(numeric_only=True)
+            c_wall_0dte = dfAgg_0dte['TotalGamma'].idxmax() if not dfAgg_0dte.empty else np.nan
+            p_wall_0dte = dfAgg_0dte['TotalGamma'].idxmin() if not dfAgg_0dte.empty else np.nan
+
+            # Cálculo Basis ES
+            try: es_spot = float(yf.Ticker("ES=F").history(period="1d")["Close"].iloc[-1])
+            except: es_spot = spotPrice
+            basis = es_spot - spotPrice
+
+            # Zero Gama e Níveis Intermediários
             df["daysTillExp"] = np.where(df["ExpirationDate"].dt.date == datetime.now().date(), 1/262, np.busday_count(datetime.now().date(), df["ExpirationDate"].dt.date.values.astype('datetime64[D]')) / 262)
             df_calc = df[df['daysTillExp'] > 0]
             levels = np.arange(np.floor(spotPrice * 0.8 / 5) * 5, np.ceil(spotPrice * 1.2 / 5) * 5 + 5, 5.0)
@@ -102,10 +110,6 @@ if st.button("INICIAR EXTRAÇÃO AUTOMÁTICA"):
             z_gama = float(levels[zeroCrossIdx[0]] - totalGamma[zeroCrossIdx[0]] * (levels[zeroCrossIdx[0] + 1] - levels[zeroCrossIdx[0]]) / (totalGamma[zeroCrossIdx[0] + 1] - totalGamma[zeroCrossIdx[0]])) if len(zeroCrossIdx) > 0 else np.nan
             
             df_filt = dfAgg[(dfAgg.index >= spotPrice * 0.8) & (dfAgg.index <= spotPrice * 1.2)]
-            top_calls = df_filt['TotalGamma'].nlargest(3).index.tolist()
-            l1 = top_calls[1] if (len(top_calls) > 1 and top_calls[0] == c_wall) else (top_calls[0] if len(top_calls)>0 else np.nan)
-            c1 = df_filt[df_filt.index > p_wall]['TotalGamma'].idxmin() if not df_filt[df_filt.index > p_wall].empty else np.nan
-            c4 = df_filt[df_filt.index < p_wall]['TotalGamma'].idxmin() if not df_filt[df_filt.index < p_wall].empty else np.nan
             vt = df_filt[(df_filt.index > p_wall) & (df_filt.index < z_gama)]['TotalGamma'].idxmin() if not df_filt[(df_filt.index > p_wall) & (df_filt.index < z_gama)].empty else np.nan
 
             def fmt(val, is_zg=False):
@@ -116,26 +120,35 @@ if st.button("INICIAR EXTRAÇÃO AUTOMÁTICA"):
             regime_gama = "POSITIVO" if spotPrice > z_gama else "NEGATIVO"
             cor_gama = "#00FFAA" if spotPrice > z_gama else "#FF4444"
 
-            # Painel de Controle Analítico Atualizado
+            # Interface de Usuário
             st.markdown(f"""
             <div style='background-color:#1E222D; padding:20px; border-radius:10px; border-left: 5px solid {cor_gama}; margin-bottom: 25px;'>
                 <h3 style='margin:0; color:white; font-family: Arial;'>REGIME GEX: <span style='color:{cor_gama}'>{regime_gama}</span></h3>
                 <p style='margin:10px 0 0 0; color:#8A94A6; font-size: 16px;'>
-                    VIX SPOT: <b style='color:#FFF;'>{vix_spot:.2f}</b> | TENDÊNCIA: <b style='color:#FFF;'>{trend_vix}</b><br>
+                    VIX SPOT: <b style='color:#FFF;'>{vix_spot:.2f}</b> | {trend_vix}<br>
                     ESTRATÉGIA DO DIA: <b style='color:#FFF;'>{regime_vix}</b>
                 </p>
             </div>
             """, unsafe_allow_html=True)
             
+            # Bloco 0DTE
+            st.markdown("<h4 style='color:#FFF;'>⏱️ MURALHAS 0DTE (Microestrutura)</h4>", unsafe_allow_html=True)
+            c0_col, p0_col = st.columns(2)
+            with c0_col:
+                st.write("CALL WALL 0DTE (Resistência Intraday)"); st.code(fmt(c_wall_0dte))
+            with p0_col:
+                st.write("PUT WALL 0DTE (Suporte Intraday)"); st.code(fmt(p_wall_0dte))
+            
+            st.markdown("<hr>", unsafe_allow_html=True)
+            
+            # Bloco Macro
+            st.markdown("<h4 style='color:#FFF;'>🛡️ NÍVEIS MACRO (Estrutural)</h4>", unsafe_allow_html=True)
             c1_col, c2_col = st.columns(2)
             with c1_col:
-                st.write("CALL WALL (RESISTÊNCIA)"); st.code(fmt(c_wall))
-                st.write("ZERO GAMA (THE FLIP)"); st.code(fmt(z_gama, True))
-                st.write("PUT WALL (SUPORTE)"); st.code(fmt(p_wall))
+                st.write("CALL WALL PRINCIPAL"); st.code(fmt(c_wall))
+                st.write("ZERO GAMA (FLIP)"); st.code(fmt(z_gama, True))
             with c2_col:
                 st.write("VOL TRIGGER"); st.code(fmt(vt))
-                st.write("NÍVEL L1"); st.code(fmt(l1))
-                st.write("NÍVEL C1"); st.code(fmt(c1))
-                st.write("NÍVEL C4"); st.code(fmt(c4))
+                st.write("PUT WALL PRINCIPAL"); st.code(fmt(p_wall))
 
         except Exception as e: st.error(f"Erro de processamento: {e}")
