@@ -9,7 +9,7 @@ import yfinance as yf
 import altair as alt
 
 # ============================================================================
-# CONFIGURAÇÃO DA PÁGINA
+# CONFIGURAÇÃO DA PÁGINA E AUTO-REFRESH (DESPERTADOR INSTITUCIONAL)
 # ============================================================================
 st.set_page_config(
     page_title="GEX ULTRA ELITE TERMINAL",
@@ -17,6 +17,30 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Injeção de JavaScript para Auto-Refresh às 10:45 (Hora Local do Navegador)
+st.markdown("""
+    <script>
+    function checkTimeAndRefresh() {
+        const now = new Date();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        const today = now.toDateString();
+        const lastReload = sessionStorage.getItem('last_gex_reload');
+
+        // Dispara exatamente às 10:45 da manhã
+        if (hours === 10 && minutes === 45) {
+            if (lastReload !== today) {
+                sessionStorage.setItem('last_gex_reload', today);
+                console.log("⏰ 10:45 - Iniciando Recalibragem Institucional Automática...");
+                window.parent.location.reload();
+            }
+        }
+    }
+    // Verifica o relógio a cada 30 segundos
+    setInterval(checkTimeAndRefresh, 30000);
+    </script>
+""", unsafe_allow_html=True)
 
 # ============================================================================
 # CSS PREMIUM - DESIGN PROFISSIONAL
@@ -95,7 +119,6 @@ def fetch_vix_data():
         return {'vix': 20.0, 'vix9d': 20.0, 'vix_avg': 20.0, 'vix_high': 25.0, 'vix_low': 15.0}
 
 def generate_trade_signal(spot, basis, levels, regime, vix_data):
-    # Nova estrutura de sinal incluindo os detalhes do score
     signal = {
         "direction": None, "confidence": 0, "entry_zone": None, 
         "targets": [], "invalidation": None, "reasoning": [], "risk_reward": 0,
@@ -304,7 +327,7 @@ def render_header():
             <span class='badge badge-info'>✅ CBOE API</span>
             <span class='badge badge-warning'>⚡ &lt;500ms</span>
             <span class='badge badge-positive'>🔐 Execução Algorítmica</span>
-            <span class='badge badge-info'>📊 Ajuste Basis Ativo</span>
+            <span class='badge badge-info'>⏰ Auto-Refresh (10:45)</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -314,7 +337,6 @@ def render_setup_score(score, max_score, regime, details):
     color = "#00FFAA" if score >= 2 else "#FFCC00" if score == 1 else "#FF4444"
     status = "✅ PISTA LIVRE" if score >= 2 else "⚠️ FILTRO ATIVO" if score == 1 else "❌ TRADE BLOQUEADO"
     
-    # Gerador de ícones e cores para o Raio-X
     def get_icon(is_true): return "✅" if is_true else "❌"
     def get_color(is_true): return "#00FFAA" if is_true else "#FF4444"
     
@@ -433,10 +455,10 @@ with st.sidebar:
     manual_price = st.number_input(
         "Preço atual no seu gráfico (MT5/TV):", 
         value=0.00, step=0.25, format="%.2f",
-        help="Deixe 0.00 para usar o preço automático da bolsa. Preencha apenas se houver distorção de rolagem de contratos na sua corretora."
+        help="Deixe 0.00 para usar o preço automático da bolsa. Preencha apenas se houver distorção de rolagem de contratos."
     )
     st.markdown("---")
-    st.caption("🔐 GEX ULTRA ELITE v5.2\n\n*Validação Quantitativa Direta*")
+    st.caption("🔐 GEX ULTRA ELITE v5.3\n\n*Auto-Refresh Integrado*")
 
 if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, type="primary"):
     with st.spinner("⚡ Calculando derivativos, sincronizando Basis ES e avaliando setup..."):
@@ -498,7 +520,7 @@ if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, ty
                 basis_alert_html = f"""
                 <div class='semaforo-alerta'>
                     ⚠️ ALERTA DE BASIS: ES-SPX = {basis:+.2f} pts
-                    <br><small>Detectada distorção provável de Rolagem de Contratos (Quad Witching). Se as linhas não casarem com seu gráfico, digite o preço exato da sua tela no menu lateral esquerdo.</small>
+                    <br><small>Detectada distorção provável de Rolagem de Contratos. Se as linhas não casarem com seu gráfico, digite o preço exato da sua tela no menu lateral esquerdo.</small>
                 </div>
                 """
 
@@ -530,7 +552,6 @@ if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, ty
             
             col_score, col_signal = st.columns([1, 2])
             with col_score:
-                # Agora o card recebe os detalhes (verdadeiro/falso para cada pilar)
                 signal = generate_trade_signal(spotPrice, basis, levels_dict, regime_gama, vix_data)
                 render_setup_score(signal['confidence'], 3, regime_gama, signal['score_details'])
                 
@@ -590,7 +611,7 @@ if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, ty
             df_chart['StrikePrice'] = df_chart['StrikePrice'] + basis
             render_gamma_profile(df_chart, es_spot, z_gama + basis, c_wall + basis, p_wall + basis)
             
-            st.markdown("<br><br><div style='text-align:center; padding:20px; color:#444; font-size:11px; border-top:1px solid #2b313f;'><strong>GEX ULTRA ELITE TERMINAL v5.2</strong><br>Validação Quantitativa para MT5 • Dados: CBOE API • Latência &lt;500ms<br>© 2026 Todos os direitos reservados</div>", unsafe_allow_html=True)
+            st.markdown("<br><br><div style='text-align:center; padding:20px; color:#444; font-size:11px; border-top:1px solid #2b313f;'><strong>GEX ULTRA ELITE TERMINAL v5.3</strong><br>Validação Quantitativa para MT5 • Dados: CBOE API • Latência &lt;500ms<br>© 2026 Todos os direitos reservados</div>", unsafe_allow_html=True)
 
         except Exception as e:
             st.error(f"❌ Erro de processamento: {str(e)}")
