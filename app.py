@@ -96,16 +96,18 @@ def calcGammaEx(S, K, vol, T, r, q, optType, OI):
 
 @st.cache_data(ttl=60)
 def fetch_json(symbol="SPX"):
+    """Busca dados de opções da CBOE - URL CORRIGIDA ✅"""
     headers = {"User-Agent": "Mozilla/5.0"}
     for s in [symbol, f"_{symbol}"]:
         try:
-            url_cboe = f"https://cdn.cboe.com/api/global/delayed_quotes/options/{s}.json"
-            r = requests.get(url_cboe, headers=headers, timeout=10)
+            # ✅ URL LIMPA - SEM ESPAÇOS
+            url = f"https://cdn.cboe.com/api/global/delayed_quotes/options/{s}.json"
+            r = requests.get(url, headers=headers, timeout=10)
             r.raise_for_status()
             return r.json()
         except: 
             continue
-    raise Exception("Falha na conexão com a CBOE. Verifique sua conexão ou se a API está online.")
+    raise Exception("Falha na conexão com a CBOE.")
 
 def fetch_vix_data():
     try:
