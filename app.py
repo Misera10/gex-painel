@@ -6,6 +6,16 @@ Features: Dashboard Completa | Painel de Cópia (TradingView) | MT5 Sync | Níve
 import sys
 import os
 
+# --- HACK PARA RODAR NA NUVEM (STREAMLIT CLOUD) ---
+@st.cache_resource
+def install_playwright():
+    import os
+    os.system("playwright install chromium")
+    os.system("playwright install-deps chromium")
+
+install_playwright()
+# --------------------------------------------------
+
 __version__ = "5.3.0"
 
 if sys.platform == 'win32':
