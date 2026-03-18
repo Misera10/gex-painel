@@ -1,33 +1,10 @@
 """
-GEX ULTRA ELITE TERMINAL PRO (Internal v5.3)
-Features: Nuvem Ready | Dashboard Completa | MT5 Sync | Níveis 0DTE/L1/C1/C4 | Playbook
+GEX ULTRA ELITE TERMINAL PRO (Cloud Frontend v6.0)
+Features: Nuvem 100% Segura | API Request | Playbook Tático | MT5 Sync | SPX Exclusive
 """
 
 import sys
 import os
-import streamlit as st
-
-# --- HACK PARA RODAR NA NUVEM (STREAMLIT CLOUD) ---
-@st.cache_resource
-def install_playwright():
-    os.system("playwright install chromium")
-
-install_playwright()
-# --------------------------------------------------
-
-__version__ = "5.3.0"
-
-if sys.platform == 'win32':
-    import asyncio
-    try:
-        if sys.version_info >= (3, 12):
-            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        else:
-            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    except Exception:
-        pass
-    os.environ['PYTHONASYNCIODEBUG'] = '0'
-
 import json
 import re
 import html
@@ -38,19 +15,21 @@ from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import warnings
 import time
-import random
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+import streamlit as st
 import pandas as pd
 import numpy as np
 from scipy.stats import norm
 import yfinance as yf
 import altair as alt
-from playwright.sync_api import sync_playwright
+import requests
 
 warnings.filterwarnings('ignore')
+
+__version__ = "6.0.0"
 
 # ============================================================================
 # CONFIGURAÇÕES
@@ -58,16 +37,10 @@ warnings.filterwarnings('ignore')
 
 @dataclass
 class GEXConfig:
-    USER_DATA_PATH: str = os.path.join(os.getcwd(), "user_data")
     CACHE_TTL: int = 300
-    REQUEST_TIMEOUT: int = 60000
-    MAX_RETRIES: int = 3
-    HEADLESS: bool = True
-    DELAY_BETWEEN_REQUESTS: int = 5
     TIMEZONE: str = 'America/New_York'
 
 config = GEXConfig()
-os.makedirs(config.USER_DATA_PATH, exist_ok=True)
 
 # ============================================================================
 # CSS PREMIUM + DESIGN IMAGÉTICO
@@ -303,62 +276,32 @@ def get_spy_analysis() -> Dict[str, Any]:
     except Exception: return {}
 
 # ============================================================================
-# CBOE SCRAPER
+# API SCRAPER (REPLACE DO PLAYWRIGHT)
 # ============================================================================
 
-class CBOEScraper:
-    def __init__(self):
-        self.config = config
+class APIScraper:
+    def __init__(self, api_url: str):
+        self.api_url = api_url.rstrip('/')
     
     def fetch_institutional_data(self, symbol: str = "SPX") -> Optional[Dict]:
-        for attempt in range(self.config.MAX_RETRIES):
-            try:
-                time.sleep(1)
-                data = self._scrape_stealth(symbol)
-                if data and self._validate_data(data): return data
-                if attempt < self.config.MAX_RETRIES - 1: time.sleep(3)
-            except Exception as e:
-                logger.error(f"Erro: {e}")
-        return None
-    
-    def _scrape_stealth(self, symbol: str) -> Optional[Dict]:
-        with sync_playwright() as p:
-            context = p.chromium.launch_persistent_context(
-                self.config.USER_DATA_PATH,
-                headless=self.config.HEADLESS,
-                args=['--disable-blink-features=AutomationControlled', '--disable-web-security', '--no-sandbox'],
-                viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
-            )
-            page = context.pages[0] if context.pages else context.new_page()
-            try:
-                url_json = f"https://cdn.cboe.com/api/global/delayed_quotes/options/{symbol}.json"
-                page.goto(url_json, wait_until="domcontentloaded", timeout=self.config.REQUEST_TIMEOUT)
-                time.sleep(random.uniform(2, 4))
-                content = page.inner_text("body")
-                
-                if "options" in content and "data" in content:
-                    data = json.loads(content)
-                    context.close()
+        try:
+            # Faz a requisição para a SUA API separada
+            url = f"{self.api_url}/api/cboe/{symbol}"
+            response = requests.get(url, timeout=60)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if self._validate_data(data):
                     return data
-                
-                url_chain = f"https://www.cboe.com/indices/quotes/option-chain/{symbol}/"
-                page.goto(url_chain, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(3000)
-                page.goto(url_json, timeout=60000)
-                content = page.inner_text("body")
-                
-                if "options" in content:
-                    data = json.loads(content)
-                    context.close()
-                    return data
-                
-                context.close()
+            else:
+                st.error(f"❌ Erro na API: A API retornou status {response.status_code}. Detalhes: {response.text}")
                 return None
-            except Exception as e:
-                context.close()
-                raise e
-    
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Falha de conexão com a API: {e}")
+            st.error("❌ Não foi possível conectar à API do GEX. Verifique se o seu backend/Ngrok está rodando e a URL está correta na barra lateral.")
+            return None
+
     def _validate_data(self, data: Dict) -> bool:
         try: return ("data" in data and "last" in data["data"] and "options" in data["data"] and len(data["data"]["options"]) > 0)
         except Exception: return False
@@ -540,6 +483,18 @@ plot({adj('pw')}, "Put Wall", color.green, 2)
 plot({adj('vt')}, "Vol Trigger", color.aqua, 1)
 """
 
+def modo_manual():
+    uploaded = st.file_uploader("📁 Upload JSON CBOE (SPX.json):", type=['json'])
+    if uploaded:
+        try:
+            data = json.load(uploaded)
+            if "data" in data and "options" in data["data"]:
+                st.success("✅ JSON carregado com sucesso!")
+                return data
+        except Exception as e:
+            st.error(f"❌ Erro: {e}")
+    return None
+
 # ============================================================================
 # INTERFACE PRINCIPAL
 # ============================================================================
@@ -574,10 +529,17 @@ def main():
     vix9d_val = market_data.get("^VIX9D")
     es_fut = market_data.get("ES=F")
     
-    # --- SIDEBAR LIMPA ---
+    # --- SIDEBAR LIMPA (CLOUD FRIENDLY) ---
     with st.sidebar:
         st.header("⚙️ Configurações")
-        range_pct = st.slider("Range Gráfico (%):", 1, 10, 3)
+        
+        st.markdown("""
+<div style="background: rgba(0, 212, 255, 0.1); padding: 10px; border-radius: 8px; border-left: 3px solid #00D4FF; margin-bottom: 10px;">
+<h4 style="color: #00D4FF; margin: 0; font-size: 13px; text-transform: uppercase;">🔗 Conexão Backend (API)</h4>
+</div>
+""", unsafe_allow_html=True)
+        # AQUI O USUÁRIO COLOCA A URL DO NGROK OU DO SERVIDOR LOCAL
+        api_url = st.text_input("URL da sua API:", value="http://127.0.0.1:8000", help="Se rodar no PC local deixe 127.0.0.1. Se for nuvem, cole o link do seu Ngrok.")
         
         st.divider()
         st.markdown("""
@@ -594,27 +556,33 @@ def main():
         usar_mt5 = st.toggle("✅ Usar MT5 para ajustar níveis", value=True)
         
         st.divider()
-        with st.expander("🔧 Manutenção (Anti-Bloqueio)"):
-            st.caption("Se a CBOE bloquear repetidas vezes, ative esta chave, clique em processar e resolva o Captcha na janela do Chrome. Depois, desative.")
-            modo_debug = st.checkbox("Ativar Modo Debug", value=False)
+        range_pct = st.slider("Range Gráfico (%):", 1, 10, 3)
+        modo_manual_ativo = st.checkbox("🛠️ Modo Manual (Upload JSON)", value=False)
         
     # --- AÇÃO DOS BOTÕES ---
     data_to_use = st.session_state.spx_data
     is_live = True
     ativo = "SPX"
     
-    if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL (SPX)", use_container_width=True, type="primary"):
-        with st.spinner("🔍 Conectando à CBOE (Motor Persistente)..."):
-            config.HEADLESS = not modo_debug
-            scraper = CBOEScraper()
-            new_data = scraper.fetch_institutional_data(ativo)
-            if new_data:
-                data_to_use = new_data
-                st.session_state.spx_data = new_data
-                st.session_state.last_update = datetime.now().strftime("%H:%M:%S")
-                st.rerun()
-            else:
-                st.error("❌ CBOE bloqueou temporariamente. Ative o Modo Debug na barra lateral ou tente novamente.")
+    if modo_manual_ativo:
+        json_data = modo_manual()
+        if json_data:
+            data_to_use = json_data
+            st.session_state.spx_data = json_data
+            st.session_state.last_update = datetime.now().strftime("%H:%M:%S")
+            is_live = True
+    else:
+        if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL (SPX)", use_container_width=True, type="primary"):
+            with st.spinner("🔍 Conectando ao Backend via API..."):
+                scraper = APIScraper(api_url=api_url)
+                new_data = scraper.fetch_institutional_data(ativo)
+                if new_data:
+                    data_to_use = new_data
+                    st.session_state.spx_data = new_data
+                    st.session_state.last_update = datetime.now().strftime("%H:%M:%S")
+                    st.rerun()
+                else:
+                    st.error("Falha ao atualizar dados. Verifique a conexão com a API.")
 
     # --- LÓGICA DE DADOS (DEMO VS REAL) ---
     if not data_to_use:
@@ -630,7 +598,7 @@ def main():
             'l1': 5250.0, 'c1': 5050.0, 'c4': 4900.0,
             'cw_0dte': 5150.0, 'pw_0dte': 5050.0
         }
-        st.markdown('<div class="offline-banner">🟡 MODO DEMO: Exibindo perfil estrutural. Pressione o botão acima para sincronizar com o mercado real.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="offline-banner">🟡 MODO DEMO: Exibindo perfil estrutural. Pressione o botão acima para conectar com seu backend API.</div>', unsafe_allow_html=True)
     else:
         spot = float(data_to_use["data"]["last"])
         df = pd.DataFrame(data_to_use["data"]["options"])
@@ -788,7 +756,7 @@ def main():
     live_status = "ONLINE (LIVE)" if is_live else "OFFLINE (DEMO)"
     st.markdown(f"""
 <div style="text-align:center; font-size:11px; color:#5a6478; font-family:JetBrains Mono; text-transform: uppercase;">
-GEX ULTRA ELITE PRO | Status: {live_status} | MT5 Sync: {mt5_status}
+GEX ULTRA ELITE PRO | Frontend Cloud v6.0 | Status: {live_status} | MT5 Sync: {mt5_status}
 </div>
 """, unsafe_allow_html=True)
 
