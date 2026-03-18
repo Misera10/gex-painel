@@ -190,13 +190,13 @@ def generate_trade_report(signal, levels, spot, basis, timestamp):
     return report
 
 def export_to_tradingview(levels, basis, es_spot, timestamp):
-    """Gera estrutura JSON para importação no TradingView ancorado no ES"""
+    """Gera estrutura JSON para importação no TradingView ancorado no ES (Tempo Real)"""
     tv_data = {
         "schemaVersion": 1,
         "displayProperties": {
             "title": f"GEX Levels - {timestamp.strftime('%d/%m/%Y')}",
             "description": "Níveis institucionais baseados em Gamma Exposure (Ajustados p/ ES)",
-            "symbol": "ES1!",
+            "symbol": "OANDA:SPX500USD",
             "interval": "D",
             "timezone": "America/New_York",
             "theme": "dark"
