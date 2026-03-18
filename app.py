@@ -189,8 +189,6 @@ def generate_trade_report(signal, levels, spot, basis, timestamp):
     return report
 
 def generate_pine_script(levels, basis, timestamp):
-    """Gera código Pine Script v5 avançado com VWAP e ajuste de sobreposição (V24)."""
-    
     def get_val(key):
         val = levels.get(key)
         return round(val + basis, 2) if pd.notna(val) and val > 0 else 0.0
@@ -478,26 +476,31 @@ if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, ty
             
             with col_signal:
                 st.markdown('<div class="label">🎯 ORDEM DE EXECUÇÃO (MT5)</div>', unsafe_allow_html=True)
-                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                
                 if signal['direction']:
                     st.markdown(f"""
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                        <div style="font-size:32px; font-weight:900; color:{'#00FFAA' if 'LONG' in signal['direction'] else '#FF4444'};">
-                            {signal['direction']}
+                    <div class="metric-card">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                            <div style="font-size:32px; font-weight:900; color:{'#00FFAA' if 'LONG' in signal['direction'] else '#FF4444'};">
+                                {signal['direction']}
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="color:#8A94A6; font-size:12px;">Ponto de Entrada Recomendado</div>
+                                <div style="font-size:22px; font-weight:800; color:#00D4FF;">{signal['entry_zone']}</div>
+                            </div>
                         </div>
-                        <div style="text-align:right;">
-                            <div style="color:#8A94A6; font-size:12px;">Ponto de Entrada Recomendado</div>
-                            <div style="font-size:22px; font-weight:800; color:#00D4FF;">{signal['entry_zone']}</div>
+                        <hr style="border-color:#2b313f; margin:15px 0;">
+                        <div style="color:#8A94A6; font-size:14px; line-height:1.8;">
+                            {chr(10).join(f'• {r}' for r in signal['reasoning'])}
                         </div>
-                    </div>
-                    <hr style="border-color:#2b313f; margin:15px 0;">
-                    <div style="color:#8A94A6; font-size:14px; line-height:1.8;">
-                        {chr(10).join(f'• {r}' for r in signal['reasoning'])}
                     </div>
                     """, unsafe_allow_html=True)
                 else:
-                    st.markdown('<div style="color:#8A94A6; text-align:center; padding:20px;">⏳ Aguardando afastamento da zona de compressão...</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
+                    st.markdown("""
+                    <div class="metric-card">
+                        <div style="color:#8A94A6; text-align:center; padding:20px;">⏳ Aguardando afastamento da zona de compressão...</div>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
                 if signal['direction']:
                     st.download_button(label="📄 BAIXAR REGISTRO DE TRADE", data=generate_trade_report(signal, levels_dict, spotPrice, basis, datetime.now()), file_name=f"GEX_Execucao_{datetime.now().strftime('%Y%m%d_%H%M')}.md", mime="text/markdown", use_container_width=True)
