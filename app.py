@@ -38,6 +38,7 @@ st.markdown("""
     .header-box { background: linear-gradient(135deg, rgba(30, 34, 45, 0.9), rgba(26, 31, 46, 0.9)); padding: 25px; border-radius: 12px; border: 1px solid rgba(0, 255, 170, 0.2); margin-bottom: 20px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); }
     .progress-container { background: #2b313f; border-radius: 6px; height: 10px; overflow: hidden; margin: 10px 0; }
     .progress-bar { background: linear-gradient(90deg, #00FFAA, #00D4FF); height: 100%; border-radius: 6px; transition: width 0.5s ease; }
+    .semaforo-alerta { background: linear-gradient(135deg, rgba(255, 204, 0, 0.1), rgba(255, 204, 0, 0.05)); border-left: 5px solid #FFCC00; padding: 15px 20px; border-radius: 8px; color: #FFCC00; font-weight: 700; font-size: 14px; margin: 15px 0; box-shadow: 0 2px 10px rgba(255, 204, 0, 0.1); }
     @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
     .animate-slide-in { animation: slideIn 0.5s ease-out; }
     [data-testid="stSidebar"] { background: linear-gradient(180deg, #1a1f2e 0%, #0b0e14 100%); border-right: 1px solid #2b313f; }
@@ -396,7 +397,7 @@ with st.sidebar:
     st.markdown("#### 🎚️ Parâmetros Institucionais")
     st.slider("Tolerância Distância Wall (pts)", 10, 50, 25, 5)
     st.markdown("---")
-    st.caption("🔐 GEX ULTRA ELITE v4.0\n\n*Validação Quantitativa Direta*")
+    st.caption("🔐 GEX ULTRA ELITE v4.1\n\n*Validação Quantitativa Direta*")
 
 if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, type="primary"):
     with st.spinner("⚡ Calculando derivativos, sincronizando Basis ES e avaliando setup..."):
@@ -411,7 +412,13 @@ if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, ty
             
             now_et = pd.Timestamp.now('US/Eastern')
             close_et = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
-            timer_0dte = "MERCADO FECHADO" if now_et > close_et else f"{divmod((close_et - now_et).seconds, 3600)[0]:02d}h {divmod(divmod((close_et - now_et).seconds, 3600)[1], 60)[0]:02d}m restantes"
+            if now_et > close_et:
+                timer_0dte = "MERCADO FECHADO"
+            else:
+                time_left = close_et - now_et
+                hours, remainder = divmod(time_left.seconds, 3600)
+                minutes, _ = divmod(remainder, 60)
+                timer_0dte = f"{hours:02d}h {minutes:02d}m restantes"
 
             df_raw = pd.DataFrame(data["data"]["options"])
             parsed = df_raw["option"].apply(lambda x: re.search(r'^(.*?)(\d{6})([CP])(\d{8})$', x))
@@ -433,9 +440,25 @@ if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, ty
             c_wall_0dte = dfAgg_0dte['TotalGamma'].idxmax() if not dfAgg_0dte.empty else np.nan
             p_wall_0dte = dfAgg_0dte['TotalGamma'].idxmin() if not dfAgg_0dte.empty else np.nan
 
-            try: es_spot = float(yf.Ticker("ES=F").history(period="1d")["Close"].iloc[-1])
-            except: es_spot = spotPrice
+            try:
+                es_data = yf.Ticker("ES=F").history(period="1d", interval="1m")
+                if not es_data.empty:
+                    es_spot = float(es_data["Close"].iloc[-1])
+                else:
+                    es_spot = spotPrice
+            except:
+                es_spot = spotPrice
+                
             basis = es_spot - spotPrice
+
+            basis_alert_html = ""
+            if abs(basis) > 10:
+                basis_alert_html = f"""
+                <div class='semaforo-alerta'>
+                    ⚠️ ALERTA DE BASIS: ES-SPX = {basis:+.2f} pts
+                    <br><small>Verifique rollover de contrato ou evento macro. Níveis projetados podem sofrer distorção intradiária.</small>
+                </div>
+                """
 
             df["daysTillExp"] = np.where(df["ExpirationDate"].dt.date == datetime.now().date(), 1/262, np.busday_count(datetime.now().date(), df["ExpirationDate"].dt.date.values.astype('datetime64[D]')) / 262)
             df_calc = df[df['daysTillExp'] > 0]
@@ -460,6 +483,8 @@ if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, ty
             regime_gama = "POSITIVO" if spotPrice > z_gama else "NEGATIVO"
 
             render_status_box(regime_gama, regime_vix, term_structure, timer_0dte, vix_data)
+            if basis_alert_html:
+                st.markdown(basis_alert_html, unsafe_allow_html=True)
             
             col_score, col_signal = st.columns([1, 2])
             with col_score:
@@ -521,7 +546,7 @@ if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, ty
             df_chart['StrikePrice'] = df_chart['StrikePrice'] + basis
             render_gamma_profile(df_chart, es_spot, z_gama + basis, c_wall + basis, p_wall + basis)
             
-            st.markdown("<br><br><div style='text-align:center; padding:20px; color:#444; font-size:11px; border-top:1px solid #2b313f;'><strong>GEX ULTRA ELITE TERMINAL v4.0</strong><br>Validação Quantitativa para MT5 • Dados: CBOE API • Latência &lt;500ms<br>© 2026 Todos os direitos reservados</div>", unsafe_allow_html=True)
+            st.markdown("<br><br><div style='text-align:center; padding:20px; color:#444; font-size:11px; border-top:1px solid #2b313f;'><strong>GEX ULTRA ELITE TERMINAL v4.1</strong><br>Validação Quantitativa para MT5 • Dados: CBOE API • Latência &lt;500ms<br>© 2026 Todos os direitos reservados</div>", unsafe_allow_html=True)
 
         except Exception as e:
             st.error(f"❌ Erro de processamento: {str(e)}")
