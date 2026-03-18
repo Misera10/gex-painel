@@ -95,7 +95,13 @@ def fetch_vix_data():
         return {'vix': 20.0, 'vix9d': 20.0, 'vix_avg': 20.0, 'vix_high': 25.0, 'vix_low': 15.0}
 
 def generate_trade_signal(spot, basis, levels, regime, vix_data):
-    signal = {"direction": None, "confidence": 0, "entry_zone": None, "targets": [], "invalidation": None, "reasoning": [], "risk_reward": 0}
+    # Nova estrutura de sinal incluindo os detalhes do score
+    signal = {
+        "direction": None, "confidence": 0, "entry_zone": None, 
+        "targets": [], "invalidation": None, "reasoning": [], "risk_reward": 0,
+        "score_details": {"regime": False, "alvo": False, "vix": False}
+    }
+    
     es_spot = spot + basis
     es_zg = levels.get('z_gama', spot) + basis if not pd.isna(levels.get('z_gama')) else es_spot
     es_pw = levels.get('p_wall_0dte', levels.get('p_wall', spot)) + basis
@@ -105,10 +111,12 @@ def generate_trade_signal(spot, basis, levels, regime, vix_data):
         signal['direction'] = "SHORT 📉"
         signal['reasoning'].append("✅ Regime GEX Negativo: Dealers amplificam vendas")
         signal['confidence'] += 1
+        signal['score_details']['regime'] = True
     elif regime == "POSITIVO" and es_spot > es_zg:
         signal['direction'] = "LONG 📈"
         signal['reasoning'].append("✅ Regime GEX Positivo: Mean-reversion favorecido")
         signal['confidence'] += 1
+        signal['score_details']['regime'] = True
     else:
         signal['reasoning'].append("⚠️ Preço próximo ao Zero Gamma: Aguardar definição")
     
@@ -119,6 +127,7 @@ def generate_trade_signal(spot, basis, levels, regime, vix_data):
         if dist_to_put > alvo_pontos:
             signal['targets'].append(es_pw)
             signal['confidence'] += 1
+            signal['score_details']['alvo'] = True
             signal['reasoning'].append(f"✅ Alvo técnico limpo em {es_pw:.2f} ({dist_to_put:.0f} pts de espaço)")
         else:
             signal['reasoning'].append(f"❌ Suporte muito próximo ({dist_to_put:.0f} pts). Risco de repique na Put Wall.")
@@ -130,6 +139,7 @@ def generate_trade_signal(spot, basis, levels, regime, vix_data):
         if dist_to_call > alvo_pontos:
             signal['targets'].append(es_cw)
             signal['confidence'] += 1
+            signal['score_details']['alvo'] = True
             signal['reasoning'].append(f"✅ Alvo técnico limpo em {es_cw:.2f} ({dist_to_call:.0f} pts de espaço)")
         else:
             signal['reasoning'].append(f"❌ Resistência muito próxima ({dist_to_call:.0f} pts). Risco de rejeição na Call Wall.")
@@ -139,11 +149,14 @@ def generate_trade_signal(spot, basis, levels, regime, vix_data):
     if vix_data.get('vix9d', 0) > vix_data.get('vix', 0):
         if signal['direction'] == "SHORT 📉":
             signal['confidence'] += 1
+            signal['score_details']['vix'] = True
             signal['reasoning'].append("🔥 VIX Backwardation: Pânico institucional confirma força da venda.")
         else:
             signal['reasoning'].append("⚠️ VIX Backwardation: Perigoso para operações compradas (Long).")
     else:
-        if signal['direction'] == "LONG 📈": signal['confidence'] += 1
+        if signal['direction'] == "LONG 📈": 
+            signal['confidence'] += 1
+            signal['score_details']['vix'] = True
         signal['reasoning'].append("✅ Contango Normal: Ambiente estável para predição técnica.")
     
     if signal['invalidation'] and signal['targets']:
@@ -183,11 +196,6 @@ def generate_trade_report(signal, levels, spot, basis, timestamp):
 - Stop Loss Institucional: {stop_loss_str}
 - Alvo Primário (Take Profit): {alvo_str}
 - Payoff (R:R Estimado): {signal['risk_reward']:.2f}
-
-## 📊 Estrutura de Volatilidade
-- VIX Spot: {levels.get('vix', 0):.2f}
-- VIX9D: {levels.get('vix9d', 0):.2f}
-- Média 20d: {levels.get('vix_avg', 0):.2f}
 """
     return report
 
@@ -221,7 +229,7 @@ pw_0dte = input.float({get_val('p_wall_0dte')}, "Put Wall 0DTE", group=grp_0dte)
 grp_filtros = "Filtros"
 show_vwap = input.bool(true, "Exibir VWAP Intradiária", group=grp_filtros)
 
-// --- AJUSTE VISUAL (Evitar Sobreposição) ---
+// --- AJUSTE VISUAL ---
 grp_visual = "Espaçamento dos Textos"
 col1 = input.int(2, "Distância Coluna 1 (Macro)", group=grp_visual)
 col2 = input.int(15, "Distância Coluna 2 (0DTE)", group=grp_visual)
@@ -301,10 +309,32 @@ def render_header():
     </div>
     """, unsafe_allow_html=True)
 
-def render_setup_score(score, max_score=3, regime="NEGATIVO"):
+def render_setup_score(score, max_score, regime, details):
     pct = (score / max_score) * 100
     color = "#00FFAA" if score >= 2 else "#FFCC00" if score == 1 else "#FF4444"
     status = "✅ PISTA LIVRE" if score >= 2 else "⚠️ FILTRO ATIVO" if score == 1 else "❌ TRADE BLOQUEADO"
+    
+    # Gerador de ícones e cores para o Raio-X
+    def get_icon(is_true): return "✅" if is_true else "❌"
+    def get_color(is_true): return "#00FFAA" if is_true else "#FF4444"
+    
+    checklist_html = f"""
+    <div style="margin-top: 15px; font-size: 13px; color: #8A94A6; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+        <div style="display:flex; justify-content:space-between; margin-bottom: 8px;">
+            <span>1. Sincronia de Regime (Direção Correta)</span>
+            <span style="color: {get_color(details['regime'])};">{get_icon(details['regime'])}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom: 8px;">
+            <span>2. Espaço para o Alvo (Longe da Parede)</span>
+            <span style="color: {get_color(details['alvo'])};">{get_icon(details['alvo'])}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between;">
+            <span>3. Volatilidade a Favor (VIX Confirmando)</span>
+            <span style="color: {get_color(details['vix'])};">{get_icon(details['vix'])}</span>
+        </div>
+    </div>
+    """
+
     st.markdown(f"""
     <div class="metric-card animate-slide-in">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
@@ -316,6 +346,7 @@ def render_setup_score(score, max_score=3, regime="NEGATIVO"):
             <div style="color:{color}; font-weight:700; font-size:16px;">{status}</div>
         </div>
         <div class="progress-container"><div class="progress-bar" style="width:{pct}%; background: linear-gradient(90deg, {color}, {color}88);"></div></div>
+        {checklist_html}
     </div>
     """, unsafe_allow_html=True)
 
@@ -405,7 +436,7 @@ with st.sidebar:
         help="Deixe 0.00 para usar o preço automático da bolsa. Preencha apenas se houver distorção de rolagem de contratos na sua corretora."
     )
     st.markdown("---")
-    st.caption("🔐 GEX ULTRA ELITE v5.1\n\n*Validação Quantitativa Direta*")
+    st.caption("🔐 GEX ULTRA ELITE v5.2\n\n*Validação Quantitativa Direta*")
 
 if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, type="primary"):
     with st.spinner("⚡ Calculando derivativos, sincronizando Basis ES e avaliando setup..."):
@@ -448,7 +479,6 @@ if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, ty
             c_wall_0dte = dfAgg_0dte['TotalGamma'].idxmax() if not dfAgg_0dte.empty else np.nan
             p_wall_0dte = dfAgg_0dte['TotalGamma'].idxmin() if not dfAgg_0dte.empty else np.nan
 
-            # Lógica de Preço (Automático vs Manual)
             if manual_price > 0:
                 es_spot = manual_price
             else:
@@ -500,8 +530,10 @@ if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, ty
             
             col_score, col_signal = st.columns([1, 2])
             with col_score:
+                # Agora o card recebe os detalhes (verdadeiro/falso para cada pilar)
                 signal = generate_trade_signal(spotPrice, basis, levels_dict, regime_gama, vix_data)
-                render_setup_score(signal['confidence'], 3, regime_gama)
+                render_setup_score(signal['confidence'], 3, regime_gama, signal['score_details'])
+                
                 st.markdown(f"""
                 <div class='metric-card'>
                     <div style="color:#8A94A6; font-size:13px; margin-bottom:8px;">
@@ -558,7 +590,7 @@ if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, ty
             df_chart['StrikePrice'] = df_chart['StrikePrice'] + basis
             render_gamma_profile(df_chart, es_spot, z_gama + basis, c_wall + basis, p_wall + basis)
             
-            st.markdown("<br><br><div style='text-align:center; padding:20px; color:#444; font-size:11px; border-top:1px solid #2b313f;'><strong>GEX ULTRA ELITE TERMINAL v5.1</strong><br>Validação Quantitativa para MT5 • Dados: CBOE API • Latência &lt;500ms<br>© 2026 Todos os direitos reservados</div>", unsafe_allow_html=True)
+            st.markdown("<br><br><div style='text-align:center; padding:20px; color:#444; font-size:11px; border-top:1px solid #2b313f;'><strong>GEX ULTRA ELITE TERMINAL v5.2</strong><br>Validação Quantitativa para MT5 • Dados: CBOE API • Latência &lt;500ms<br>© 2026 Todos os direitos reservados</div>", unsafe_allow_html=True)
 
         except Exception as e:
             st.error(f"❌ Erro de processamento: {str(e)}")
