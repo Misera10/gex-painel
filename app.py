@@ -130,16 +130,16 @@ def generate_trade_signal(spot, basis, levels, regime, vix_data):
     
     if regime == "NEGATIVO" and es_spot < es_zg:
         signal['direction'] = "SHORT 📉"
-        signal['reasoning'].append("✅ Regime GEX Negativo: Dealers amplificam vendas")
+        signal['reasoning'].append("✅ Regime GEX Negativo: Institucionais favorecem vendas (Short).")
         signal['confidence'] += 1
         signal['score_details']['regime'] = True
     elif regime == "POSITIVO" and es_spot > es_zg:
         signal['direction'] = "LONG 📈"
-        signal['reasoning'].append("✅ Regime GEX Positivo: Mean-reversion favorecido")
+        signal['reasoning'].append("✅ Regime GEX Positivo: Institucionais favorecem compras (Long).")
         signal['confidence'] += 1
         signal['score_details']['regime'] = True
     else:
-        signal['reasoning'].append("⚠️ Preço próximo ao Zero Gamma: Aguardar definição")
+        signal['reasoning'].append("⚠️ Preço próximo ao Zero Gamma: Aguardar definição.")
     
     alvo_pontos = es_spot * 0.005
     
@@ -153,7 +153,9 @@ def generate_trade_signal(spot, basis, levels, regime, vix_data):
         else:
             signal['reasoning'].append(f"❌ Suporte muito próximo ({dist_to_put:.0f} pts). Risco de repique.")
         signal['invalidation'] = es_zg + 10
-        signal['entry_zone'] = f"{es_spot:.2f} - {es_spot-5:.2f}"
+        # NOVO GATILHO TÁTICO INSTITUCIONAL
+        signal['entry_zone'] = "Pullback VWAP/ZG"
+        signal['reasoning'].append("🎯 GATILHO: Aguarde o preço subir até a VWAP ou Zero Gama e deixar pavio de rejeição na parte de cima antes de vender.")
         
     elif signal['direction'] == "LONG 📈":
         dist_to_call = abs(es_spot - es_cw)
@@ -165,7 +167,9 @@ def generate_trade_signal(spot, basis, levels, regime, vix_data):
         else:
             signal['reasoning'].append(f"❌ Resistência muito próxima ({dist_to_call:.0f} pts). Risco de rejeição.")
         signal['invalidation'] = es_zg - 10
-        signal['entry_zone'] = f"{es_spot:.2f} - {es_spot+5:.2f}"
+        # NOVO GATILHO TÁTICO INSTITUCIONAL
+        signal['entry_zone'] = "Retorno VWAP/ZG"
+        signal['reasoning'].append("🎯 GATILHO: Aguarde o preço cair até a VWAP ou Zero Gama e deixar pavio de defesa na parte de baixo antes de comprar.")
     
     if vix_data.get('vix9d', 0) > vix_data.get('vix', 0):
         if signal['direction'] == "SHORT 📉":
@@ -201,7 +205,7 @@ def generate_trade_report(signal, levels, spot, basis, timestamp):
 |-------|-------|
 | Direção | {direction} |
 | Confiança | {confidence} |
-| Zona de Entrada | {signal['entry_zone'] or 'Aguardar confirmação'} |
+| Gatilho Tático | {signal['entry_zone'] or 'Aguardar confirmação'} |
 | Score | {signal['confidence']}/3 |
 
 ## 📍 Estrutura de Hedging
@@ -311,7 +315,7 @@ def render_header():
     st.markdown("""
     <div style='text-align:center; padding: 20px 0; margin-bottom: 20px;'>
         <h1 class='gradient-title'>⚡ GEX ULTRA ELITE TERMINAL</h1>
-        <p class='subtitle'>Sincronização Automática CFD Integrada</p>
+        <p class='subtitle'>Sincronização Automática CFD/Mesa Proprietária • Fluxo 0DTE Integrado</p>
         <div style='display:flex; justify-content:center; gap:12px; margin-top:15px; flex-wrap:wrap;'>
             <span class='badge badge-info'>✅ CBOE API</span>
             <span class='badge badge-positive'>🔐 CFD Auto-Sync</span>
@@ -446,7 +450,7 @@ with st.sidebar:
         help="CFDs seguem o mercado à vista (Basis zerado automático). Futuros seguem juros (Basis automático)."
     )
     st.markdown("---")
-    st.caption("🔐 GEX ULTRA ELITE v5.5 COMPLETA\n\n*CFD Auto-Sync & Layout Total*")
+    st.caption("🔐 GEX ULTRA ELITE v5.6 COMPLETA\n\n*CFD Auto-Sync & Gatilho Sniper*")
 
 if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, type="primary"):
     with st.spinner("⚡ Calculando derivativos, sincronizando Basis e avaliando setup..."):
@@ -601,7 +605,7 @@ if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, ty
             df_chart['StrikePrice'] = df_chart['StrikePrice'] + basis
             render_gamma_profile(df_chart, es_spot, z_gama + basis, c_wall + basis, p_wall + basis)
             
-            st.markdown("<br><br><div style='text-align:center; padding:20px; color:#444; font-size:11px; border-top:1px solid #2b313f;'><strong>GEX ULTRA ELITE TERMINAL v5.5 COMPLETA</strong><br>Validação Quantitativa para MT5 • Dados: CBOE API • Latência &lt;500ms<br>© 2026 Todos os direitos reservados</div>", unsafe_allow_html=True)
+            st.markdown("<br><br><div style='text-align:center; padding:20px; color:#444; font-size:11px; border-top:1px solid #2b313f;'><strong>GEX ULTRA ELITE TERMINAL v5.6 COMPLETA</strong><br>Validação Quantitativa para MT5 • Dados: CBOE API • Latência &lt;500ms<br>© 2026 Todos os direitos reservados</div>", unsafe_allow_html=True)
 
         except Exception as e:
             st.error(f"❌ Erro de processamento: {str(e)}")
