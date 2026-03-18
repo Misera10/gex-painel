@@ -1,7 +1,7 @@
-streamlit
+streamlit==1.32.0
 pandas
 numpy
 scipy
-requests
 yfinance
 altair
+playwright==1.42.0
