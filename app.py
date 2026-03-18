@@ -10,8 +10,7 @@ import streamlit as st
 # --- HACK PARA RODAR NA NUVEM (STREAMLIT CLOUD) ---
 @st.cache_resource
 def install_playwright():
-    os.system("python -m playwright install chromium")
-    os.system("python -m playwright install-deps chromium")
+    os.system("playwright install chromium")
 
 install_playwright()
 # --------------------------------------------------
