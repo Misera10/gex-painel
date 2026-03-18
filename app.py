@@ -75,11 +75,14 @@ def fetch_json(symbol="SPX"):
     headers = {"User-Agent": "Mozilla/5.0"}
     for s in [symbol, f"_{symbol}"]:
         try:
-            r = requests.get(f"https://cdn.cboe.com/api/global/delayed_quotes/options/{s}.json", headers=headers, timeout=10)
+            # URL isolada para garantir ausência de espaços fantasmas
+            url_cboe = f"https://cdn.cboe.com/api/global/delayed_quotes/options/{s}.json"
+            r = requests.get(url_cboe, headers=headers, timeout=10)
             r.raise_for_status()
             return r.json()
-        except: continue
-    raise Exception("Falha na conexão com a CBOE.")
+        except: 
+            continue
+    raise Exception("Falha na conexão com a CBOE. Verifique sua conexão ou se a API está online.")
 
 def fetch_vix_data():
     try:
@@ -397,7 +400,7 @@ with st.sidebar:
     st.markdown("#### 🎚️ Parâmetros Institucionais")
     st.slider("Tolerância Distância Wall (pts)", 10, 50, 25, 5)
     st.markdown("---")
-    st.caption("🔐 GEX ULTRA ELITE v4.1\n\n*Validação Quantitativa Direta*")
+    st.caption("🔐 GEX ULTRA ELITE v4.2\n\n*Validação Quantitativa Direta*")
 
 if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, type="primary"):
     with st.spinner("⚡ Calculando derivativos, sincronizando Basis ES e avaliando setup..."):
@@ -546,7 +549,7 @@ if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, ty
             df_chart['StrikePrice'] = df_chart['StrikePrice'] + basis
             render_gamma_profile(df_chart, es_spot, z_gama + basis, c_wall + basis, p_wall + basis)
             
-            st.markdown("<br><br><div style='text-align:center; padding:20px; color:#444; font-size:11px; border-top:1px solid #2b313f;'><strong>GEX ULTRA ELITE TERMINAL v4.1</strong><br>Validação Quantitativa para MT5 • Dados: CBOE API • Latência &lt;500ms<br>© 2026 Todos os direitos reservados</div>", unsafe_allow_html=True)
+            st.markdown("<br><br><div style='text-align:center; padding:20px; color:#444; font-size:11px; border-top:1px solid #2b313f;'><strong>GEX ULTRA ELITE TERMINAL v4.2</strong><br>Validação Quantitativa para MT5 • Dados: CBOE API • Latência &lt;500ms<br>© 2026 Todos os direitos reservados</div>", unsafe_allow_html=True)
 
         except Exception as e:
             st.error(f"❌ Erro de processamento: {str(e)}")
