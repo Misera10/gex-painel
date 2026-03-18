@@ -1,629 +1,797 @@
+"""
+GEX ULTRA ELITE TERMINAL PRO (Internal v5.3)
+Features: Dashboard Completa | Painel de Cópia (TradingView) | MT5 Sync | Níveis 0DTE/L1/C1/C4 | Playbook
+"""
+
+import sys
+import os
+
+__version__ = "5.3.0"
+
+if sys.platform == 'win32':
+    import asyncio
+    try:
+        if sys.version_info >= (3, 12):
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        else:
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception:
+        pass
+    os.environ['PYTHONASYNCIODEBUG'] = '0'
+
+import json
+import re
+import html
+import logging
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple, Any
+from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import warnings
+import time
+import random
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 from scipy.stats import norm
-from datetime import datetime, timedelta
-import requests
-import re
 import yfinance as yf
 import altair as alt
+from playwright.sync_api import sync_playwright
+
+warnings.filterwarnings('ignore')
 
 # ============================================================================
-# CONFIGURAÇÃO DA PÁGINA E AUTO-REFRESH (DESPERTADOR INSTITUCIONAL)
+# CONFIGURAÇÕES
 # ============================================================================
+
+@dataclass
+class GEXConfig:
+    USER_DATA_PATH: str = os.path.join(os.getcwd(), "user_data")
+    CACHE_TTL: int = 300
+    REQUEST_TIMEOUT: int = 60000
+    MAX_RETRIES: int = 3
+    HEADLESS: bool = True
+    DELAY_BETWEEN_REQUESTS: int = 5
+    TIMEZONE: str = 'America/New_York'
+
+config = GEXConfig()
+os.makedirs(config.USER_DATA_PATH, exist_ok=True)
+
+# ============================================================================
+# CSS PREMIUM + DESIGN IMAGÉTICO
+# ============================================================================
+
 st.set_page_config(
-    page_title="GEX ULTRA ELITE TERMINAL",
-    page_icon="⚡",
+    page_title="GEX ULTRA ELITE PRO", 
+    page_icon="⚡", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Injeção de JavaScript para Auto-Refresh às 10:45 (Hora Local do Navegador)
 st.markdown("""
-    <script>
-    function checkTimeAndRefresh() {
-        const now = new Date();
-        const hours = now.getHours();
-        const minutes = now.getMinutes();
-        const today = now.toDateString();
-        const lastReload = sessionStorage.getItem('last_gex_reload');
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&display=swap');
 
-        // Dispara exatamente às 10:45 da manhã
-        if (hours === 10 && minutes === 45) {
-            if (lastReload !== today) {
-                sessionStorage.setItem('last_gex_reload', today);
-                console.log("⏰ 10:45 - Iniciando Recalibragem Institucional Automática...");
-                window.parent.location.reload();
-            }
-        }
-    }
-    // Verifica o relógio a cada 30 segundos
-    setInterval(checkTimeAndRefresh, 30000);
-    </script>
+.stApp { 
+    background: linear-gradient(135deg, #0b0e14 0%, #131824 100%); 
+    font-family: 'Inter', sans-serif;
+}
+
+.header-container {
+    background: linear-gradient(90deg, rgba(11, 14, 20, 0.9) 0%, rgba(26, 31, 46, 0.7) 100%), 
+                url('https://images.unsplash.com/photo-1642543492481-44e81e3914a7?q=80&w=2000&auto=format&fit=crop') center/cover;
+    border-radius: 16px;
+    padding: 35px 30px;
+    margin-bottom: 25px;
+    margin-top: -20px;
+    border: 1px solid rgba(0, 255, 170, 0.2);
+    box-shadow: 0 15px 35px rgba(0,0,0,0.4);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.gradient-title { 
+    background: linear-gradient(90deg, #00FFAA, #00D4FF); 
+    -webkit-background-clip: text; 
+    -webkit-text-fill-color: transparent; 
+    font-weight: 800; 
+    font-size: 36px; 
+    margin: 0; 
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: -1px;
+}
+
+.header-subtitle {
+    color: #8A94A6;
+    margin-top: 8px;
+    margin-bottom: 0;
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.header-status {
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #8A94A6;
+    background: rgba(0,0,0,0.4);
+    padding: 10px 15px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.05);
+    backdrop-filter: blur(5px);
+}
+
+.metric-card { 
+    background: rgba(20, 25, 35, 0.7); 
+    border: 1px solid rgba(255, 255, 255, 0.05); 
+    border-radius: 12px; 
+    padding: 20px; 
+    margin: 10px 0; 
+    backdrop-filter: blur(12px); 
+    text-align: center;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+}
+
+.metric-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(0, 255, 170, 0.3);
+    box-shadow: 0 8px 25px rgba(0, 255, 170, 0.1);
+}
+
+.metric-card.mt5-active {
+    border: 1px solid #00D4FF;
+    background: linear-gradient(180deg, rgba(0, 212, 255, 0.1) 0%, rgba(20, 25, 35, 0.8) 100%);
+}
+
+.metric-value { 
+    color: #00FFAA !important; 
+    font-size: 26px !important; 
+    font-weight: 900 !important; 
+    background: rgba(0,0,0,0.3) !important; 
+    border: 1px solid rgba(255,255,255,0.05); 
+    display: block; 
+    padding: 10px; 
+    border-radius: 8px; 
+    font-family: 'JetBrains Mono', monospace;
+    margin-top: 8px;
+}
+
+.metric-label { 
+    color: #8A94A6; 
+    font-weight: 700; 
+    font-size: 12px; 
+    text-transform: uppercase; 
+    letter-spacing: 1px;
+}
+
+.playbook-container {
+    background: rgba(15, 20, 28, 0.95);
+    border-radius: 12px;
+    padding: 25px;
+    margin: 10px 0;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.05);
+}
+.playbook-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+    margin-top: 15px;
+}
+.playbook-item {
+    background: rgba(0,0,0,0.3);
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.03);
+}
+.playbook-item-title {
+    font-size: 11px;
+    color: #8A94A6;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+.playbook-item-value {
+    font-size: 14px;
+    color: #E0E6ED;
+    font-weight: 700;
+    font-family: 'Inter', sans-serif;
+}
+.filter-badge {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: bold;
+    margin-right: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.divergence-alert {
+    background: rgba(255, 71, 87, 0.1);
+    border: 1px solid rgba(255, 71, 87, 0.3);
+    border-radius: 8px;
+    padding: 12px;
+    margin: 10px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+}
+.divergence-alert.high { background: rgba(255, 71, 87, 0.2); border-color: #ff4757; }
+.divergence-alert.medium { background: rgba(255, 204, 0, 0.1); border-color: #ffa502; }
+
+.offline-banner {
+    background: rgba(255, 204, 0, 0.1);
+    border: 1px solid #FFCC00;
+    color: #FFCC00;
+    padding: 12px;
+    border-radius: 8px;
+    text-align: center;
+    font-weight: 600;
+    margin-bottom: 15px;
+    letter-spacing: 0.5px;
+}
+
+.copy-panel-title {
+    font-size: 13px;
+    color: #8A94A6;
+    text-transform: uppercase;
+    font-weight: 800;
+    margin-top: 15px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 5px;
+    letter-spacing: 1px;
+}
+
+div[data-testid="stCodeBlock"] {
+    margin-bottom: -10px !important;
+}
+</style>
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# CSS PREMIUM - DESIGN PROFISSIONAL
-# ============================================================================
-st.markdown("""
-    <style>
-    .stApp { background: linear-gradient(135deg, #0b0e14 0%, #1a1f2e 100%); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-    .metric-card { background: rgba(30, 34, 45, 0.85); border: 1px solid rgba(0, 255, 170, 0.2); border-radius: 12px; padding: 20px; margin: 10px 0; backdrop-filter: blur(10px); transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3); }
-    .metric-card:hover { border-color: #00FFAA; box-shadow: 0 8px 25px rgba(0, 255, 170, 0.2); transform: translateY(-2px); }
-    .gradient-title { background: linear-gradient(90deg, #00FFAA, #00D4FF); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 32px; margin: 0; }
-    .subtitle { color: #8A94A6; font-size: 14px; margin: 5px 0 20px 0; }
-    .badge { display: inline-block; padding: 5px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin: 2px; }
-    .badge-positive { background: rgba(0, 255, 170, 0.15); color: #00FFAA; border: 1px solid rgba(0, 255, 170, 0.3); }
-    .badge-negative { background: rgba(255, 68, 68, 0.15); color: #FF4444; border: 1px solid rgba(255, 68, 68, 0.3); }
-    .badge-warning { background: rgba(255, 204, 0, 0.15); color: #FFCC00; border: 1px solid rgba(255, 204, 0, 0.3); }
-    .badge-info { background: rgba(0, 212, 255, 0.15); color: #00D4FF; border: 1px solid rgba(0, 212, 255, 0.3); }
-    code { color: #00FFAA !important; font-family: 'Courier New', monospace; font-size: 28px !important; font-weight: 900 !important; padding: 15px !important; display: block; text-align: center; border-radius: 8px; background: linear-gradient(135deg, #161a25, #1f2533) !important; border: 2px solid #00FFAA33; box-shadow: 0 4px 15px rgba(0, 255, 170, 0.1); }
-    .label { color: #8A94A6; font-weight: 600; margin-bottom: 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .header-box { background: linear-gradient(135deg, rgba(30, 34, 45, 0.9), rgba(26, 31, 46, 0.9)); padding: 25px; border-radius: 12px; border: 1px solid rgba(0, 255, 170, 0.2); margin-bottom: 20px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); }
-    .progress-container { background: #2b313f; border-radius: 6px; height: 10px; overflow: hidden; margin: 10px 0; }
-    .progress-bar { background: linear-gradient(90deg, #00FFAA, #00D4FF); height: 100%; border-radius: 6px; transition: width 0.5s ease; }
-    .semaforo-alerta { background: linear-gradient(135deg, rgba(255, 204, 0, 0.1), rgba(255, 204, 0, 0.05)); border-left: 5px solid #FFCC00; padding: 15px 20px; border-radius: 8px; color: #FFCC00; font-weight: 700; font-size: 14px; margin: 15px 0; box-shadow: 0 2px 10px rgba(255, 204, 0, 0.1); }
-    @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
-    .animate-slide-in { animation: slideIn 0.5s ease-out; }
-    [data-testid="stSidebar"] { background: linear-gradient(180deg, #1a1f2e 0%, #0b0e14 100%); border-right: 1px solid #2b313f; }
-    .stButton>button { background: linear-gradient(135deg, #00FFAA, #00D4FF); color: #0b0e14 !important; font-weight: 700; border: none; border-radius: 8px; padding: 10px 24px; transition: all 0.3s ease; }
-    .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0, 255, 170, 0.4); }
-    hr { border-color: #2b313f; margin: 20px 0; }
-    </style>
-""", unsafe_allow_html=True)
-
-# ============================================================================
-# FUNÇÕES MATEMÁTICAS E EXTRAÇÃO DE DADOS
+# FUNÇÕES UTILITÁRIAS
 # ============================================================================
 
-@st.cache_data(ttl=300)
-def calcGammaEx(S, K, vol, T, r, q, optType, OI):
-    K, vol, T, OI = map(lambda x: np.asarray(x, dtype=float), [K, vol, T, OI])
-    result = np.zeros_like(K, dtype=float)
-    valid = (T > 0) & (vol > 0) & (K > 0) & np.isfinite(T) & np.isfinite(vol) & np.isfinite(K)
-    if not np.any(valid): return result
-    Kv, vv, Tv, OIv = K[valid], vol[valid], T[valid], OI[valid]
-    sqrtT = np.sqrt(Tv)
-    dp = (np.log(S / Kv) + (r - q + 0.5 * vv**2) * Tv) / (vv * sqrtT)
-    dm = dp - vv * sqrtT
-    if optType == "call":
-        gamma = np.exp(-q * Tv) * norm.pdf(dp) / (S * vv * sqrtT)
-        result[valid] = OIv * 100 * S * S * 0.01 * gamma
-    else:
-        gamma = Kv * np.exp(-r * Tv) * norm.pdf(dm) / (S * S * vv * sqrtT)
-        result[valid] = OIv * 100 * S * S * 0.01 * gamma
-    return result
+def sanitize_html(text: str) -> str:
+    if not isinstance(text, str): text = str(text)
+    return html.escape(text)
 
-@st.cache_data(ttl=60)
-def fetch_json(symbol="SPX"):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    for s in [symbol, f"_{symbol}"]:
+@st.cache_data(ttl=config.CACHE_TTL)
+def fetch_yf_data(tickers: Tuple[str, ...]) -> Dict[str, Optional[float]]:
+    results = {}
+    def fetch_single(ticker: str) -> Tuple[str, Optional[float]]:
         try:
-            url_cboe = f"https://cdn.cboe.com/api/global/delayed_quotes/options/  {s}.json"
-            r = requests.get(url_cboe, headers=headers, timeout=10)
-            r.raise_for_status()
-            return r.json()
-        except: 
-            continue
-    raise Exception("Falha na conexão com a CBOE. Verifique sua conexão ou se a API está online.")
+            data = yf.Ticker(ticker).history(period="2d")
+            if not data.empty: return ticker, float(data["Close"].iloc[-1])
+            return ticker, None
+        except Exception: return ticker, None
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {executor.submit(fetch_single, t): t for t in tickers}
+        for future in as_completed(futures):
+            ticker, price = future.result()
+            results[ticker] = price
+    return results
 
-def fetch_vix_data():
+def get_spy_analysis() -> Dict[str, Any]:
     try:
-        vix = yf.Ticker("^VIX")
-        vix9d = yf.Ticker("^VIX9D")
-        vix_hist = vix.history(period="1mo")["Close"]
-        vix_spot = float(vix.history(period="1d")["Close"].iloc[-1])
-        vix9d_spot = float(vix9d.history(period="1d")["Close"].iloc[-1])
-        return {'vix': vix_spot, 'vix9d': vix9d_spot, 'vix_avg': float(vix_hist.mean()), 'vix_high': float(vix_hist.max()), 'vix_low': float(vix_hist.min())}
-    except:
-        return {'vix': 20.0, 'vix9d': 20.0, 'vix_avg': 20.0, 'vix_high': 25.0, 'vix_low': 15.0}
+        spy = yf.Ticker("SPY")
+        hist = spy.history(period="5d")
+        if hist.empty: return {}
+        current = float(hist['Close'].iloc[-1])
+        previous = float(hist['Close'].iloc[-2])
+        change_pct = ((current - previous) / previous) * 100
+        return {'price': current, 'change_pct': change_pct, 'trend': 'up' if change_pct > 0 else 'down'}
+    except Exception: return {}
 
-def generate_trade_signal(spot, basis, levels, regime, vix_data):
-    signal = {
-        "direction": None, "confidence": 0, "entry_zone": None, 
-        "targets": [], "invalidation": None, "reasoning": [], "risk_reward": 0,
-        "score_details": {"regime": False, "alvo": False, "vix": False}
-    }
+# ============================================================================
+# CBOE SCRAPER
+# ============================================================================
+
+class CBOEScraper:
+    def __init__(self):
+        self.config = config
     
-    es_spot = spot + basis
-    es_zg = levels.get('z_gama', spot) + basis if not pd.isna(levels.get('z_gama')) else es_spot
-    es_pw = levels.get('p_wall_0dte', levels.get('p_wall', spot)) + basis
-    es_cw = levels.get('c_wall_0dte', levels.get('c_wall', spot)) + basis
+    def fetch_institutional_data(self, symbol: str = "SPX") -> Optional[Dict]:
+        for attempt in range(self.config.MAX_RETRIES):
+            try:
+                time.sleep(1)
+                data = self._scrape_stealth(symbol)
+                if data and self._validate_data(data): return data
+                if attempt < self.config.MAX_RETRIES - 1: time.sleep(3)
+            except Exception as e:
+                logger.error(f"Erro: {e}")
+        return None
     
-    if regime == "NEGATIVO" and es_spot < es_zg:
-        signal['direction'] = "SHORT 📉"
-        signal['reasoning'].append("✅ Regime GEX Negativo: Dealers amplificam vendas")
-        signal['confidence'] += 1
-        signal['score_details']['regime'] = True
-    elif regime == "POSITIVO" and es_spot > es_zg:
-        signal['direction'] = "LONG 📈"
-        signal['reasoning'].append("✅ Regime GEX Positivo: Mean-reversion favorecido")
-        signal['confidence'] += 1
-        signal['score_details']['regime'] = True
-    else:
-        signal['reasoning'].append("⚠️ Preço próximo ao Zero Gamma: Aguardar definição")
+    def _scrape_stealth(self, symbol: str) -> Optional[Dict]:
+        with sync_playwright() as p:
+            context = p.chromium.launch_persistent_context(
+                self.config.USER_DATA_PATH,
+                headless=self.config.HEADLESS,
+                args=['--disable-blink-features=AutomationControlled', '--disable-web-security', '--no-sandbox'],
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+            try:
+                url_json = f"https://cdn.cboe.com/api/global/delayed_quotes/options/{symbol}.json"
+                page.goto(url_json, wait_until="domcontentloaded", timeout=self.config.REQUEST_TIMEOUT)
+                time.sleep(random.uniform(2, 4))
+                content = page.inner_text("body")
+                
+                if "options" in content and "data" in content:
+                    data = json.loads(content)
+                    context.close()
+                    return data
+                
+                url_chain = f"https://www.cboe.com/indices/quotes/option-chain/{symbol}/"
+                page.goto(url_chain, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(3000)
+                page.goto(url_json, timeout=60000)
+                content = page.inner_text("body")
+                
+                if "options" in content:
+                    data = json.loads(content)
+                    context.close()
+                    return data
+                
+                context.close()
+                return None
+            except Exception as e:
+                context.close()
+                raise e
     
-    alvo_pontos = es_spot * 0.005
+    def _validate_data(self, data: Dict) -> bool:
+        try: return ("data" in data and "last" in data["data"] and "options" in data["data"] and len(data["data"]["options"]) > 0)
+        except Exception: return False
+
+# ============================================================================
+# CÁLCULOS MATEMÁTICOS
+# ============================================================================
+
+class GEXCalculator:
+    def __init__(self, spot: float):
+        self.spot = spot
     
-    if signal['direction'] == "SHORT 📉":
-        dist_to_put = abs(es_spot - es_pw)
-        if dist_to_put > alvo_pontos:
-            signal['targets'].append(es_pw)
-            signal['confidence'] += 1
-            signal['score_details']['alvo'] = True
-            signal['reasoning'].append(f"✅ Alvo técnico limpo em {es_pw:.2f} ({dist_to_put:.0f} pts de espaço)")
-        else:
-            signal['reasoning'].append(f"❌ Suporte muito próximo ({dist_to_put:.0f} pts). Risco de repique na Put Wall.")
-        signal['invalidation'] = es_zg + 10
-        signal['entry_zone'] = f"{es_spot:.2f} - {es_spot-5:.2f}"
+    def calculate_gex_levels(self, df: pd.DataFrame) -> Dict[str, float]:
+        if df.empty: 
+            return {k: self.spot for k in ['zg', 'cw', 'pw', 'vt', 'l1', 'c1', 'c4', 'cw_0dte', 'pw_0dte']}
         
-    elif signal['direction'] == "LONG 📈":
-        dist_to_call = abs(es_spot - es_cw)
-        if dist_to_call > alvo_pontos:
-            signal['targets'].append(es_cw)
-            signal['confidence'] += 1
-            signal['score_details']['alvo'] = True
-            signal['reasoning'].append(f"✅ Alvo técnico limpo em {es_cw:.2f} ({dist_to_call:.0f} pts de espaço)")
-        else:
-            signal['reasoning'].append(f"❌ Resistência muito próxima ({dist_to_call:.0f} pts). Risco de rejeição na Call Wall.")
-        signal['invalidation'] = es_zg - 10
-        signal['entry_zone'] = f"{es_spot:.2f} - {es_spot+5:.2f}"
-    
-    if vix_data.get('vix9d', 0) > vix_data.get('vix', 0):
-        if signal['direction'] == "SHORT 📉":
-            signal['confidence'] += 1
-            signal['score_details']['vix'] = True
-            signal['reasoning'].append("🔥 VIX Backwardation: Pânico institucional confirma força da venda.")
-        else:
-            signal['reasoning'].append("⚠️ VIX Backwardation: Perigoso para operações compradas (Long).")
-    else:
-        if signal['direction'] == "LONG 📈": 
-            signal['confidence'] += 1
-            signal['score_details']['vix'] = True
-        signal['reasoning'].append("✅ Contango Normal: Ambiente estável para predição técnica.")
-    
-    if signal['invalidation'] and signal['targets']:
-        risk = abs(es_spot - signal['invalidation'])
-        reward = abs(signal['targets'][0] - es_spot)
-        signal['risk_reward'] = reward / risk if risk > 0 else 0
-    return signal
-
-def generate_trade_report(signal, levels, spot, basis, timestamp):
-    direction = signal['direction'] or 'NEUTRO'
-    confidence = '🟢 Alta' if signal['confidence']>=3 else '🟡 Média' if signal['confidence']==2 else '🔴 Baixa'
-    es_spot = spot + basis
-    stop_loss_str = f"{signal['invalidation']:.2f}" if signal['invalidation'] else 'N/A'
-    alvo_str = f"{signal['targets'][0]:.2f}" if signal['targets'] else 'N/A'
-    
-    report = f"""# ⚡ GEX ULTRA ELITE - Trade Report
-*Gerado em: {timestamp.strftime('%d/%m/%Y %H:%M ET')} | ES (Futuro): {es_spot:.2f} (Basis: {basis:+.2f})*
-
-## 🎯 Sinal de Execução (MetaTrader 5)
-| Campo | Valor |
-|-------|-------|
-| Direção | {direction} |
-| Confiança | {confidence} |
-| Zona de Entrada | {signal['entry_zone'] or 'Aguardar confirmação'} |
-| Score | {signal['confidence']}/3 |
-
-## 📍 Estrutura de Hedging (Ajustada p/ ES)
-- 🔴 Put Wall: {(levels.get('p_wall', 0) + basis):.2f}
-- 🔄 Zero Gamma: {(levels.get('z_gama', 0) + basis):.2f}  
-- 🟢 Call Wall: {(levels.get('c_wall', 0) + basis):.2f}
-- 📊 Vol Trigger: {(levels.get('vt', 0) + basis):.2f}
-
-## 🧠 Validação Tática
-{chr(10).join(f'- {r}' for r in signal['reasoning'])}
-
-## ⚠️ Gestão de Risco
-- Stop Loss Institucional: {stop_loss_str}
-- Alvo Primário (Take Profit): {alvo_str}
-- Payoff (R:R Estimado): {signal['risk_reward']:.2f}
-"""
-    return report
-
-def generate_pine_script(levels, basis, timestamp):
-    def get_val(key):
-        val = levels.get(key)
-        return round(val + basis, 2) if pd.notna(val) and val > 0 else 0.0
-
-    script = f"""//@version=5
-indicator("GEX ULTRA ELITE - {timestamp.strftime('%d/%m/%Y')}", overlay=true)
-
-// --- INPUTS MACRO ---
-grp_macro = "Estrutura Macro"
-cw = input.float({get_val('c_wall')}, "Call Wall Principal", group=grp_macro)
-zg = input.float({get_val('z_gama')}, "Zero Gama (Flip)", group=grp_macro)
-pw = input.float({get_val('p_wall')}, "Put Wall Principal", group=grp_macro)
-
-// --- INPUTS INTERMEDIÁRIOS ---
-grp_int = "Níveis de Fluxo"
-vt = input.float({get_val('vt')}, "Vol Trigger", group=grp_int)
-l1 = input.float({get_val('l1')}, "Nível L1", group=grp_int)
-c1 = input.float({get_val('c1')}, "Nível C1", group=grp_int)
-c4 = input.float({get_val('c4')}, "Nível C4", group=grp_int)
-
-// --- INPUTS 0DTE ---
-grp_0dte = "Microestrutura 0DTE"
-cw_0dte = input.float({get_val('c_wall_0dte')}, "Call Wall 0DTE", group=grp_0dte)
-pw_0dte = input.float({get_val('p_wall_0dte')}, "Put Wall 0DTE", group=grp_0dte)
-
-// --- FILTRO DE TENDÊNCIA ---
-grp_filtros = "Filtros"
-show_vwap = input.bool(true, "Exibir VWAP Intradiária", group=grp_filtros)
-
-// --- AJUSTE VISUAL ---
-grp_visual = "Espaçamento dos Textos"
-col1 = input.int(2, "Distância Coluna 1 (Macro)", group=grp_visual)
-col2 = input.int(15, "Distância Coluna 2 (0DTE)", group=grp_visual)
-col3 = input.int(28, "Distância Coluna 3 (Vol Trigger)", group=grp_visual)
-col4 = input.int(40, "Distância Coluna 4 (Níveis L/C)", group=grp_visual)
-
-// --- PLOTS DAS LINHAS ---
-plot(cw > 0 ? cw : na, "Call Wall", color=color.new(color.red, 0), linewidth=2)
-plot(zg > 0 ? zg : na, "Zero Gama", color=color.new(color.white, 0), linewidth=2)
-plot(pw > 0 ? pw : na, "Put Wall", color=color.new(color.green, 0), linewidth=2)
-
-plot(vt > 0 ? vt : na, "Vol Trigger", color=color.new(color.aqua, 0), linewidth=1)
-plot(l1 > 0 ? l1 : na, "Nível L1", color=color.new(color.gray, 0), linewidth=1)
-plot(c1 > 0 ? c1 : na, "Nível C1", color=color.new(color.fuchsia, 0), linewidth=1)
-plot(c4 > 0 ? c4 : na, "Nível C4", color=color.new(color.purple, 0), linewidth=1)
-
-plot(cw_0dte > 0 ? cw_0dte : na, "Call Wall 0DTE", color=color.new(color.red, 30), linewidth=2, style=plot.style_cross)
-plot(pw_0dte > 0 ? pw_0dte : na, "Put Wall 0DTE", color=color.new(color.green, 30), linewidth=2, style=plot.style_cross)
-
-// --- PLOT DA VWAP ---
-plot(show_vwap ? ta.vwap : na, "VWAP", color=color.new(color.orange, 0), linewidth=2)
-
-// --- CRIAÇÃO DOS TEXTOS ---
-var label lbl_cw = label.new(na, na, "CALL WALL", color=color.new(color.white, 100), textcolor=color.red, style=label.style_label_left, size=size.small)
-var label lbl_zg = label.new(na, na, "ZERO GAMA", color=color.new(color.white, 100), textcolor=color.white, style=label.style_label_left, size=size.small)
-var label lbl_pw = label.new(na, na, "PUT WALL", color=color.new(color.white, 100), textcolor=color.green, style=label.style_label_left, size=size.small)
-
-var label lbl_vt = label.new(na, na, "VOL TRIGGER", color=color.new(color.white, 100), textcolor=color.aqua, style=label.style_label_left, size=size.small)
-var label lbl_l1 = label.new(na, na, "NÍVEL L1", color=color.new(color.white, 100), textcolor=color.gray, style=label.style_label_left, size=size.small)
-var label lbl_c1 = label.new(na, na, "NÍVEL C1", color=color.new(color.white, 100), textcolor=color.fuchsia, style=label.style_label_left, size=size.small)
-var label lbl_c4 = label.new(na, na, "NÍVEL C4", color=color.new(color.white, 100), textcolor=color.purple, style=label.style_label_left, size=size.small)
-
-var label lbl_cw_0dte = label.new(na, na, "CALL WALL 0DTE", color=color.new(color.white, 100), textcolor=color.red, style=label.style_label_left, size=size.small)
-var label lbl_pw_0dte = label.new(na, na, "PUT WALL 0DTE", color=color.new(color.white, 100), textcolor=color.green, style=label.style_label_left, size=size.small)
-
-// --- ATUALIZAÇÃO DA POSIÇÃO NO GRÁFICO ---
-if barstate.islast
-    if cw > 0
-        label.set_xy(lbl_cw, bar_index + col1, cw)
-    if zg > 0
-        label.set_xy(lbl_zg, bar_index + col1, zg)
-    if pw > 0
-        label.set_xy(lbl_pw, bar_index + col1, pw)
+        agg = df.groupby('Strike')['GEX'].sum().reset_index()
+        strikes, gex_vals = agg['Strike'].values, agg['GEX'].values
         
-    if cw_0dte > 0
-        label.set_xy(lbl_cw_0dte, bar_index + col2, cw_0dte)
-    if pw_0dte > 0
-        label.set_xy(lbl_pw_0dte, bar_index + col2, pw_0dte)
-
-    if vt > 0
-        label.set_xy(lbl_vt, bar_index + col3, vt)
-
-    if l1 > 0
-        label.set_xy(lbl_l1, bar_index + col4, l1)
-    if c1 > 0
-        label.set_xy(lbl_c1, bar_index + col4, c1)
-    if c4 > 0
-        label.set_xy(lbl_c4, bar_index + col4, c4)
-"""
-    return script
-
-# ============================================================================
-# COMPONENTES VISUAIS
-# ============================================================================
-
-def render_header():
-    st.markdown("""
-    <div style='text-align:center; padding: 20px 0; margin-bottom: 20px;'>
-        <h1 class='gradient-title'>⚡ GEX ULTRA ELITE TERMINAL</h1>
-        <p class='subtitle'>Terminal Profissional de Gamma Exposure • SPX/ES • Fluxo 0DTE Integrado</p>
-        <div style='display:flex; justify-content:center; gap:12px; margin-top:15px; flex-wrap:wrap;'>
-            <span class='badge badge-info'>✅ CBOE API</span>
-            <span class='badge badge-warning'>⚡ &lt;500ms</span>
-            <span class='badge badge-positive'>🔐 Execução Algorítmica</span>
-            <span class='badge badge-info'>⏰ Auto-Refresh (10:45)</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-def render_setup_score(score, max_score, regime, details):
-    pct = (score / max_score) * 100
-    color = "#00FFAA" if score >= 2 else "#FFCC00" if score == 1 else "#FF4444"
-    status = "✅ PISTA LIVRE" if score >= 2 else "⚠️ FILTRO ATIVO" if score == 1 else "❌ TRADE BLOQUEADO"
+        zg = self._calculate_zero_gamma(strikes, gex_vals)
+        cw = agg.loc[agg['GEX'].idxmax(), 'Strike']
+        pw = agg.loc[agg['GEX'].idxmin(), 'Strike']
+        vt = self._calculate_vol_trigger(agg, pw, zg)
+        
+        top_calls = agg.nlargest(3, 'GEX')['Strike'].tolist()
+        l1 = top_calls[1] if (len(top_calls) > 1 and top_calls[0] == cw) else (top_calls[0] if len(top_calls)>0 else cw)
+        
+        c1_df = agg[agg['Strike'] > pw]
+        c1 = c1_df.loc[c1_df['GEX'].idxmin(), 'Strike'] if not c1_df.empty else pw
+        
+        c4_df = agg[agg['Strike'] < pw]
+        c4 = c4_df.loc[c4_df['GEX'].idxmin(), 'Strike'] if not c4_df.empty else pw
+        
+        cw_0dte, pw_0dte = self.spot, self.spot
+        if 'Date' in df.columns:
+            min_date = df['Date'].min()
+            df_0dte = df[df['Date'] == min_date].groupby('Strike')['GEX'].sum().reset_index()
+            if not df_0dte.empty:
+                cw_0dte = df_0dte.loc[df_0dte['GEX'].idxmax(), 'Strike']
+                pw_0dte = df_0dte.loc[df_0dte['GEX'].idxmin(), 'Strike']
+        
+        return {
+            'zg': float(zg), 'cw': float(cw), 'pw': float(pw), 'vt': float(vt),
+            'l1': float(l1), 'c1': float(c1), 'c4': float(c4),
+            'cw_0dte': float(cw_0dte), 'pw_0dte': float(pw_0dte)
+        }
     
-    def get_icon(is_true): return "✅" if is_true else "❌"
-    def get_color(is_true): return "#00FFAA" if is_true else "#FF4444"
-    
-    checklist_html = f"""
-    <div style="margin-top: 15px; font-size: 13px; color: #8A94A6; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
-        <div style="display:flex; justify-content:space-between; margin-bottom: 8px;">
-            <span>1. Sincronia de Regime (Direção Correta)</span>
-            <span style="color: {get_color(details['regime'])};">{get_icon(details['regime'])}</span>
-        </div>
-        <div style="display:flex; justify-content:space-between; margin-bottom: 8px;">
-            <span>2. Espaço para o Alvo (Longe da Parede)</span>
-            <span style="color: {get_color(details['alvo'])};">{get_icon(details['alvo'])}</span>
-        </div>
-        <div style="display:flex; justify-content:space-between;">
-            <span>3. Volatilidade a Favor (VIX Confirmando)</span>
-            <span style="color: {get_color(details['vix'])};">{get_icon(details['vix'])}</span>
-        </div>
-    </div>
-    """
-
-    st.markdown(f"""
-    <div class="metric-card animate-slide-in">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <span style="color:#8A94A6; font-size:13px; font-weight:700; text-transform:uppercase;">🎯 APROVAÇÃO TÁTICA</span>
-            <span class="badge badge-{'positive' if score>=2 else 'warning' if score==1 else 'negative'}">{regime}</span>
-        </div>
-        <div style="display:flex; align-items:baseline; gap:10px;">
-            <div style="font-size:42px; font-weight:900; color:{color}; line-height:1;">{score}/{max_score}</div>
-            <div style="color:{color}; font-weight:700; font-size:16px;">{status}</div>
-        </div>
-        <div class="progress-container"><div class="progress-bar" style="width:{pct}%; background: linear-gradient(90deg, {color}, {color}88);"></div></div>
-        {checklist_html}
-    </div>
-    """, unsafe_allow_html=True)
-
-def render_status_box(regime_gama, regime_vix, term_structure, timer_0dte, vix_data):
-    cor_gama = "#00FFAA" if regime_gama == "POSITIVO" else "#FF4444"
-    st.markdown(f"""
-    <div class="header-box">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
-            <div><h3 style='margin:0; color:white; font-size:24px;'>REGIME GEX: <span style='color:{cor_gama}'>{regime_gama}</span></h3></div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <span class="badge badge-info">VIX {vix_data['vix']:.2f}</span>
-                <span class="badge badge-warning">VIX9D {vix_data['vix9d']:.2f}</span>
-            </div>
-        </div>
-        <hr style='border-color:#2b313f; margin:15px 0;'>
-        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:12px;">
-            <div style="color:#8A94A6; font-size:14px;"><span style="color:#FFF; font-weight:700;">📈 ESTRATÉGIA:</span> {regime_vix}</div>
-            <div style="color:#8A94A6; font-size:14px;"><span style="color:#FFF; font-weight:700;">📊 VIX CURVE:</span> {term_structure}</div>
-            <div style="color:#8A94A6; font-size:14px;"><span style="color:#E2B714; font-weight:700;">⏱️ 0DTE:</span> {timer_0dte}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-def render_levels_grid(levels, basis=0):
-    def fmt(val, is_zg=False):
-        if pd.isna(val) or val is None: return "0.00"
-        adj = val + basis
-        return f"{round(adj * 4) / 4:.2f}" if is_zg else f"{round(adj / 5) * 5:.0f}"
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown('<div class="label">📊 MICROESTRUTURA (0DTE)</div>', unsafe_allow_html=True)
-        st.write('<div class="label">CALL WALL 0DTE (Resistência)</div>', unsafe_allow_html=True)
-        st.code(fmt(levels.get('c_wall_0dte')))
-        st.write('<div class="label">PUT WALL 0DTE (Suporte)</div>', unsafe_allow_html=True)
-        st.code(fmt(levels.get('p_wall_0dte')))
-    with col2:
-        st.markdown('<div class="label">🎯 NÍVEIS ESTRUTURAIS MACRO</div>', unsafe_allow_html=True)
-        st.write('<div class="label">CALL WALL PRINCIPAL</div>', unsafe_allow_html=True)
-        st.code(fmt(levels.get('c_wall')))
-        st.write('<div class="label">ZERO GAMMA (FLIP)</div>', unsafe_allow_html=True)
-        st.code(fmt(levels.get('z_gama'), True))
-        st.write('<div class="label">PUT WALL PRINCIPAL</div>', unsafe_allow_html=True)
-        st.code(fmt(levels.get('p_wall')))
-    st.markdown("<hr>", unsafe_allow_html=True)
-    col3, col4 = st.columns(2)
-    with col3:
-        st.write('<div class="label">VOLATILITY TRIGGER</div>', unsafe_allow_html=True)
-        st.code(fmt(levels.get('vt')))
-    with col4:
-        st.write('<div class="label">NÍVEL L1 (ALVO ALTO)</div>', unsafe_allow_html=True)
-        st.code(fmt(levels.get('l1')))
-        st.write('<div class="label">NÍVEL C1 (ALVO BAIXO)</div>', unsafe_allow_html=True)
-        st.code(fmt(levels.get('c1')))
-        st.write('<div class="label">NÍVEL C4 (EXAUSTÃO)</div>', unsafe_allow_html=True)
-        st.code(fmt(levels.get('c4')))
-
-def render_gamma_profile(df_chart, spot_price, zero_gamma, call_wall, put_wall):
-    if df_chart.empty: return
-    ref_data = pd.DataFrame({'level': [spot_price, zero_gamma, call_wall, put_wall], 'label': ['💰 ES Futuro', '🔄 Zero Gamma', '🔴 Call Wall', '🟢 Put Wall'], 'color': ['#FFFFFF', '#00FFAA', '#FF6B6B', '#4ECDC4']})
-    rules = alt.Chart(ref_data).mark_rule(strokeDash=[4, 4], strokeWidth=2).encode(y='level:Q', color=alt.Color('color:N', scale=None), tooltip=['label:N', alt.Tooltip('level:Q', format='.2f')])
-    labels = alt.Chart(ref_data[ref_data['label'] != '💰 ES Futuro']).mark_text(align='left', dx=8, fontSize=11, fontWeight='bold', color='#8A94A6').encode(y='level:Q', text='label:N')
-    bars = alt.Chart(df_chart).mark_bar(opacity=0.9, cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
-        y=alt.Y('StrikePrice:O', sort='descending', title='Strike Price (ES)', axis=alt.Axis(labelColor='#8A94A6', titleColor='#8A94A6', gridColor='#2b313f', labelFontSize=11)),
-        x=alt.X('TotalGamma:Q', title='Net GEX ($ Bilhões)', axis=alt.Axis(labelColor='#8A94A6', titleColor='#8A94A6', gridColor='#2b313f', labelFontSize=11)),
-        color=alt.Color('TotalGamma:Q', scale=alt.Scale(domain=[-10, 0, 10], range=['#FF4444', '#333333', '#00FFAA']), legend=None),
-        tooltip=[alt.Tooltip('StrikePrice:Q', title='Strike', format='.2f'), alt.Tooltip('TotalGamma:Q', title='Net GEX', format='.3f')]
-    )
-    chart = (bars + rules + labels).properties(height=500, title=alt.TitleParams("📊 GAMMA PROFILE: Concentração de Liquidez (Ajustado p/ ES)", fontSize=16, color='#FFFFFF', anchor='middle', fontWeight='bold')).configure_view(strokeWidth=0).configure_axis(grid=True, gridColor='#2b313f').configure_title(fontSize=16, color='#FFFFFF')
-    st.altair_chart(chart, use_container_width=True)
-
-# ============================================================================
-# MAIN APP FLOW
-# ============================================================================
-render_header()
-
-with st.sidebar:
-    st.markdown("### ⚙️ CONFIGURAÇÕES DA MESA")
-    st.markdown("---")
-    perfil = st.selectbox("🎯 Gestão de Risco", ["Day Trader (0.5% Alvo / 0.25% Stop)", "Scalper (Rápido)", "Swing"])
-    st.slider("Tolerância Distância Wall (pts)", 10, 50, 25, 5)
-    st.markdown("---")
-    st.markdown("#### 🎯 Sincronização de Corretora")
-    manual_price = st.number_input(
-        "Preço atual no seu gráfico (MT5/TV):", 
-        value=0.00, step=0.25, format="%.2f",
-        help="Deixe 0.00 para usar o preço automático da bolsa. Preencha apenas se houver distorção de rolagem de contratos."
-    )
-    st.markdown("---")
-    st.caption("🔐 GEX ULTRA ELITE v5.3\n\n*Auto-Refresh Integrado*")
-
-if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL", use_container_width=True, type="primary"):
-    with st.spinner("⚡ Calculando derivativos, sincronizando Basis ES e avaliando setup..."):
+    def _calculate_zero_gamma(self, strikes: np.ndarray, gex_vals: np.ndarray) -> float:
         try:
-            data = fetch_json("SPX")
-            spotPrice = data["data"].get("current_price", data["data"].get("last"))
-            vix_data = fetch_vix_data()
-            vix_spot, vix9d_spot, vix_avg = vix_data['vix'], vix_data['vix9d'], vix_data['vix_avg']
+            sign_changes = np.where(np.diff(np.sign(gex_vals)) != 0)[0]
+            if len(sign_changes) == 0: return float(strikes[np.argmin(np.abs(gex_vals))])
+            idx = sign_changes[0]
+            x1, x2, y1, y2 = strikes[idx], strikes[idx + 1], gex_vals[idx], gex_vals[idx + 1]
+            if abs(y2 - y1) < 1e-10: return float(x1)
+            return float(x1 - y1 * (x2 - x1) / (y2 - y1))
+        except: return float(self.spot)
+    
+    def _calculate_vol_trigger(self, df: pd.DataFrame, pw: float, zg: float) -> float:
+        try:
+            mask = (df['Strike'] > min(pw, zg)) & (df['Strike'] < max(pw, zg))
+            filtered = df[mask]
+            if filtered.empty: return float(pw)
+            return float(filtered.loc[filtered['GEX'].idxmin(), 'Strike'])
+        except: return float(pw)
+
+# ============================================================================
+# GERADOR DE SINAIS E PLAYBOOK
+# ============================================================================
+
+@dataclass
+class TradeSignal:
+    direction: str
+    color: str
+    regime_desc: str
+    entry_zone: str
+    targets: str
+    invalidation: str
+    filters_html: str
+    
+    def to_html(self) -> str:
+        # ALERTA DE CÓDIGO: SEM ESPAÇOS ANTES DAS TAGS HTML PARA EVITAR BUG DO MARKDOWN
+        return f"""
+<div class="playbook-container" style="border-left: 6px solid {self.color};">
+<div style="font-size: 11px; color: #8A94A6; letter-spacing: 1px; font-weight: 700;">PLANO DE VOO TÁTICO (PLAYBOOK)</div>
+<div style="font-size: 32px; font-weight: 900; color: {self.color}; font-family: 'JetBrains Mono', monospace; margin-top: -2px; margin-bottom: 5px;">{self.direction}</div>
+<div style="font-size: 14px; color: #b0b8c8; margin-bottom: 12px; font-style: italic;">{self.regime_desc}</div>
+<div class="playbook-grid">
+<div class="playbook-item">
+<div class="playbook-item-title">🟢 Gatilho (Entrada)</div>
+<div class="playbook-item-value">{self.entry_zone}</div>
+</div>
+<div class="playbook-item">
+<div class="playbook-item-title">🎯 Alvos (Take Profit)</div>
+<div class="playbook-item-value">{self.targets}</div>
+</div>
+<div class="playbook-item">
+<div class="playbook-item-title">🛑 Stop (Invalidação)</div>
+<div class="playbook-item-value">{self.invalidation}</div>
+</div>
+</div>
+<div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px; display: flex; align-items: center;">
+<span style="font-size: 11px; color: #8A94A6; margin-right: 12px; font-weight: 700;">FILTROS DA MESA:</span>
+{self.filters_html}
+</div>
+</div>
+"""
+
+class SignalGenerator:
+    def __init__(self, spot: float, basis: float, levels: Dict[str, float], spy_data: Dict = None):
+        self.es_spot = spot + basis
+        self.levels = {k: v + basis for k, v in levels.items()}
+        self.spy_data = spy_data
+        self.vix_data = {}
+    
+    def add_vix_data(self, vix: float, vix9d: float):
+        self.vix_data = {'vix': vix, 'vix9d': vix9d}
+    
+    def generate(self) -> TradeSignal:
+        es_zg = self.levels['zg']
+        es_vt = self.levels['vt']
+        es_cw = self.levels['cw']
+        es_pw = self.levels['pw']
+        es_l1 = self.levels['l1']
+        es_c1 = self.levels['c1']
+        
+        if self.es_spot > es_zg:
+            direction = "LONG 📈"
+            color = "#00FFAA"
+            regime = "Regime de Call Gamma. Market Makers estabilizam o preço atuando contra a tendência (Buy the Dip)."
+            entry = f"Aguardar pullback e comprar suporte em {es_zg:.2f} (ZG) ou rompimento limpo de {es_l1:.2f} (L1)."
+            target = f"Alvo 1: {es_l1:.2f} | Alvo Final: {es_cw:.2f} (Call Wall)"
+            stop = f"Fechamento de candle M15/H1 abaixo de {es_zg:.2f}."
             
-            term_structure = f"🔴 INVERTIDA (VIX9D {vix9d_spot:.2f} > VIX {vix_spot:.2f}) - ALERTA DE ESTRESSE" if vix9d_spot > vix_spot else f"🟢 NORMAL (VIX9D {vix9d_spot:.2f} < VIX {vix_spot:.2f}) - CONTANGO"
-            regime_vix = "REVERSÃO À MÉDIA" if vix_spot < 16 else ("DIRECIONAL" if vix_spot <= 20 else "ROMPIMENTO / PERIGO")
+        elif es_vt < self.es_spot <= es_zg:
+            direction = "RANGE / CAUTELA ⚠️"
+            color = "#FFCC00"
+            regime = "Zona de Compressão. Baixa convicção direcional com risco de violação de stops (Choppy Market)."
+            entry = f"Comprar perto de {es_vt:.2f} (VT) ou vender nas rejeições de {es_zg:.2f} (ZG)."
+            target = f"Extremo oposto da caixa d'água ({es_zg:.2f} se comprado, {es_vt:.2f} se vendido)."
+            stop = f"Rompimento com volume fora da zona ({es_vt:.2f} a {es_zg:.2f})."
             
-            now_et = pd.Timestamp.now('US/Eastern')
-            close_et = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
-            if now_et > close_et:
-                timer_0dte = "MERCADO FECHADO"
+        else:
+            direction = "STRONG SHORT 📉"
+            color = "#FF4444"
+            regime = "Gamma Trap ativado. Dealers forçados a vender contratos para proteção de Delta, acelerando o pânico."
+            entry = f"Vender pullbacks na rejeição de {es_vt:.2f} (Vol Trigger) ou na perda de {es_c1:.2f}."
+            target = f"Alvo 1: {es_c1:.2f} | Alvo Final: {es_pw:.2f} (Put Wall)"
+            stop = f"Preço se recuperar e fechar acima de {es_vt:.2f}."
+            
+        filters = []
+        if self.vix_data:
+            vix = self.vix_data.get('vix', 0)
+            vix9d = self.vix_data.get('vix9d', 0)
+            if vix9d > vix:
+                filters.append('<span class="filter-badge" style="background: rgba(255, 68, 68, 0.15); color: #ff6b6b; border: 1px solid #ff6b6b;">VIX Backwardation</span>')
+            elif vix > 20:
+                filters.append('<span class="filter-badge" style="background: rgba(255, 204, 0, 0.15); color: #FFCC00; border: 1px solid #FFCC00;">VIX Alta Volatilidade</span>')
             else:
-                time_left = close_et - now_et
-                hours, remainder = divmod(time_left.seconds, 3600)
-                minutes, _ = divmod(remainder, 60)
-                timer_0dte = f"{hours:02d}h {minutes:02d}m restantes"
-
-            df_raw = pd.DataFrame(data["data"]["options"])
-            parsed = df_raw["option"].apply(lambda x: re.search(r'^(.*?)(\d{6})([CP])(\d{8})$', x))
-            df_raw["ExpirationDate"] = pd.to_datetime(parsed.apply(lambda m: m.group(2) if m else None), format="%y%m%d") + timedelta(hours=16)
-            df_raw["OptionType"] = parsed.apply(lambda m: m.group(3) if m else None)
-            df_raw["StrikePrice"] = parsed.apply(lambda m: int(m.group(4))/1000.0 if m else np.nan)
-            
-            for col in ["iv", "gamma", "open_interest"]: df_raw[col] = pd.to_numeric(df_raw[col], errors="coerce").fillna(0)
-            calls = df_raw[df_raw["OptionType"] == "C"].rename(columns={"iv": "CallIV", "gamma": "CallGamma", "open_interest": "CallOpenInt"})
-            puts = df_raw[df_raw["OptionType"] == "P"].rename(columns={"iv": "PutIV", "gamma": "PutGamma", "open_interest": "PutOpenInt"})
-            df = pd.merge(calls[["ExpirationDate", "StrikePrice", "CallIV", "CallGamma", "CallOpenInt"]], puts[["ExpirationDate", "StrikePrice", "PutIV", "PutGamma", "PutOpenInt"]], on=["ExpirationDate", "StrikePrice"], how="outer").fillna(0)
-            df['TotalGamma'] = ((df['CallGamma'] * df['CallOpenInt'] * 100 * spotPrice**2 * 0.01) - (df['PutGamma'] * df['PutOpenInt'] * 100 * spotPrice**2 * 0.01)) / 1e9
-            
-            dfAgg = df.groupby(['StrikePrice']).sum(numeric_only=True)
-            c_wall, p_wall = dfAgg['TotalGamma'].idxmax(), dfAgg['TotalGamma'].idxmin()
-
-            min_exp = df['ExpirationDate'].min()
-            dfAgg_0dte = df[df['ExpirationDate'] == min_exp].groupby(['StrikePrice']).sum(numeric_only=True)
-            c_wall_0dte = dfAgg_0dte['TotalGamma'].idxmax() if not dfAgg_0dte.empty else np.nan
-            p_wall_0dte = dfAgg_0dte['TotalGamma'].idxmin() if not dfAgg_0dte.empty else np.nan
-
-            if manual_price > 0:
-                es_spot = manual_price
+                filters.append('<span class="filter-badge" style="background: rgba(0, 255, 170, 0.15); color: #00FFAA; border: 1px solid #00FFAA;">VIX Estável</span>')
+        
+        if self.spy_data:
+            spy_trend = self.spy_data.get('trend', 'neutral')
+            if spy_trend == 'up':
+                filters.append('<span class="filter-badge" style="background: rgba(0, 255, 170, 0.15); color: #00FFAA; border: 1px solid #00FFAA;">SPY Trend UP</span>')
             else:
-                try:
-                    es_data = yf.Ticker("ES=F").history(period="1d", interval="1m")
-                    if not es_data.empty:
-                        es_spot = float(es_data["Close"].iloc[-1])
-                    else:
-                        es_spot = spotPrice
-                except:
-                    es_spot = spotPrice
-                    
-            basis = es_spot - spotPrice
-
-            basis_alert_html = ""
-            if abs(basis) > 10 and manual_price == 0:
-                basis_alert_html = f"""
-                <div class='semaforo-alerta'>
-                    ⚠️ ALERTA DE BASIS: ES-SPX = {basis:+.2f} pts
-                    <br><small>Detectada distorção provável de Rolagem de Contratos. Se as linhas não casarem com seu gráfico, digite o preço exato da sua tela no menu lateral esquerdo.</small>
-                </div>
-                """
-
-            df["daysTillExp"] = np.where(df["ExpirationDate"].dt.date == datetime.now().date(), 1/262, np.busday_count(datetime.now().date(), df["ExpirationDate"].dt.date.values.astype('datetime64[D]')) / 262)
-            df_calc = df[df['daysTillExp'] > 0]
-            levels_range = np.arange(np.floor(spotPrice * 0.8 / 5) * 5, np.ceil(spotPrice * 1.2 / 5) * 5 + 5, 5.0)
-            
-            totalGamma = []
-            for level in levels_range:
-                cg = calcGammaEx(level, df_calc['StrikePrice'], df_calc['CallIV'].replace(0,0.15), df_calc['daysTillExp'], 0, 0, "call", df_calc['CallOpenInt'])
-                pg = calcGammaEx(level, df_calc['StrikePrice'], df_calc['PutIV'].replace(0,0.15), df_calc['daysTillExp'], 0, 0, "put", df_calc['PutOpenInt'])
-                totalGamma.append((cg - pg).sum() / 1e9)
-            
-            zeroCrossIdx = np.where(np.diff(np.sign(totalGamma)) != 0)[0]
-            z_gama = float(levels_range[zeroCrossIdx[0]] - totalGamma[zeroCrossIdx[0]] * (levels_range[zeroCrossIdx[0] + 1] - levels_range[zeroCrossIdx[0]]) / (totalGamma[zeroCrossIdx[0] + 1] - totalGamma[zeroCrossIdx[0]])) if len(zeroCrossIdx) > 0 else np.nan
-            
-            df_filt = dfAgg[(dfAgg.index >= spotPrice * 0.8) & (dfAgg.index <= spotPrice * 1.2)]
-            top_calls = df_filt['TotalGamma'].nlargest(3).index.tolist()
-            l1 = top_calls[1] if (len(top_calls) > 1 and top_calls[0] == c_wall) else (top_calls[0] if len(top_calls)>0 else np.nan)
-            c1, c4 = (df_filt[df_filt.index > p_wall]['TotalGamma'].idxmin() if not df_filt[df_filt.index > p_wall].empty else np.nan), (df_filt[df_filt.index < p_wall]['TotalGamma'].idxmin() if not df_filt[df_filt.index < p_wall].empty else np.nan)
-            vt = df_filt[(df_filt.index > p_wall) & (df_filt.index < z_gama)]['TotalGamma'].idxmin() if not df_filt[(df_filt.index > p_wall) & (df_filt.index < z_gama)].empty else np.nan
-
-            levels_dict = {'c_wall': c_wall, 'p_wall': p_wall, 'c_wall_0dte': c_wall_0dte, 'p_wall_0dte': p_wall_0dte, 'z_gama': z_gama, 'l1': l1, 'c1': c1, 'c4': c4, 'vt': vt, 'vix': vix_spot, 'vix9d': vix9d_spot, 'vix_avg': vix_avg}
-            regime_gama = "POSITIVO" if spotPrice > z_gama else "NEGATIVO"
-
-            render_status_box(regime_gama, regime_vix, term_structure, timer_0dte, vix_data)
-            if basis_alert_html:
-                st.markdown(basis_alert_html, unsafe_allow_html=True)
-            
-            col_score, col_signal = st.columns([1, 2])
-            with col_score:
-                signal = generate_trade_signal(spotPrice, basis, levels_dict, regime_gama, vix_data)
-                render_setup_score(signal['confidence'], 3, regime_gama, signal['score_details'])
+                filters.append('<span class="filter-badge" style="background: rgba(255, 68, 68, 0.15); color: #ff6b6b; border: 1px solid #ff6b6b;">SPY Trend DOWN</span>')
                 
-                st.markdown(f"""
-                <div class='metric-card'>
-                    <div style="color:#8A94A6; font-size:13px; margin-bottom:8px;">
-                        <div style="margin:5px 0;">💰 ES Futuro {'(Manual)' if manual_price > 0 else ''}: <strong style="color:#FFF">{es_spot:.2f}</strong></div>
-                        <div style="margin:5px 0;">📊 SPX Basis: <strong style="color:#00FFAA">{basis:+.2f}</strong></div>
-                        <div style="margin:5px 0;">📈 SPX Cash: <strong style="color:#8A94A6">{spotPrice:.2f}</strong></div>
-                    </div>
-                </div>""", unsafe_allow_html=True)
-            
-            with col_signal:
-                st.markdown('<div class="label">🎯 ORDEM DE EXECUÇÃO (MT5)</div>', unsafe_allow_html=True)
-                
-                if signal['direction']:
-                    st.markdown(f"""
-                    <div class="metric-card">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                            <div style="font-size:32px; font-weight:900; color:{'#00FFAA' if 'LONG' in signal['direction'] else '#FF4444'};">
-                                {signal['direction']}
-                            </div>
-                            <div style="text-align:right;">
-                                <div style="color:#8A94A6; font-size:12px;">Ponto de Entrada Recomendado</div>
-                                <div style="font-size:22px; font-weight:800; color:#00D4FF;">{signal['entry_zone']}</div>
-                            </div>
-                        </div>
-                        <hr style="border-color:#2b313f; margin:15px 0;">
-                        <div style="color:#8A94A6; font-size:14px; line-height:1.8;">
-                            {chr(10).join(f'• {r}' for r in signal['reasoning'])}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.markdown("""
-                    <div class="metric-card">
-                        <div style="color:#8A94A6; text-align:center; padding:20px;">⏳ Aguardando afastamento da zona de compressão...</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                if signal['direction']:
-                    st.download_button(label="📄 BAIXAR REGISTRO DE TRADE", data=generate_trade_report(signal, levels_dict, spotPrice, basis, datetime.now()), file_name=f"GEX_Execucao_{datetime.now().strftime('%Y%m%d_%H%M')}.md", mime="text/markdown", use_container_width=True)
-                
-                st.markdown("<hr style='border-color:#2b313f; margin:15px 0;'>", unsafe_allow_html=True)
-                st.markdown('<div class="label">🖥️ EXPORTAÇÃO PARA TRADINGVIEW</div>', unsafe_allow_html=True)
-                pine_code = generate_pine_script(levels_dict, basis, datetime.now())
-                
-                with st.expander("👉 EXIBIR CÓDIGO PINE SCRIPT (COPIAR E COLAR)"):
-                    st.code(pine_code, language="pine")
-                    st.caption("No TradingView: Abra o Pine Editor (rodapé) > Apague o conteúdo > Cole este código > Clique em 'Adicionar ao Gráfico'.")
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            render_levels_grid(levels_dict, basis)
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            df_chart = dfAgg[(dfAgg.index >= spotPrice * 0.95) & (dfAgg.index <= spotPrice * 1.05)].copy().reset_index()
-            df_chart['StrikePrice'] = df_chart['StrikePrice'] + basis
-            render_gamma_profile(df_chart, es_spot, z_gama + basis, c_wall + basis, p_wall + basis)
-            
-            st.markdown("<br><br><div style='text-align:center; padding:20px; color:#444; font-size:11px; border-top:1px solid #2b313f;'><strong>GEX ULTRA ELITE TERMINAL v5.3</strong><br>Validação Quantitativa para MT5 • Dados: CBOE API • Latência &lt;500ms<br>© 2026 Todos os direitos reservados</div>", unsafe_allow_html=True)
+        filters_html = " ".join(filters) if filters else "<span style='color:#5a6478;'>Sem dados de filtro</span>"
+        
+        return TradeSignal(direction, color, regime, entry, target, stop, filters_html)
 
+def generate_pine_script(levels: Dict[str, float], basis: float, timestamp: datetime) -> str:
+    def adj(k: str) -> float: return round(levels.get(k, 0) + basis, 2)
+    date_str = timestamp.strftime('%d/%m/%Y %H:%M')
+    return f"""//@version=5
+indicator("GEX Elite MT5 - {date_str}", overlay=true)
+plot({adj('zg')}, "Zero Gamma", color.white, 2)
+plot({adj('cw')}, "Call Wall", color.red, 2)
+plot({adj('pw')}, "Put Wall", color.green, 2)
+plot({adj('vt')}, "Vol Trigger", color.aqua, 1)
+"""
+
+def modo_manual():
+    uploaded = st.file_uploader("📁 Upload JSON CBOE (SPX.json):", type=['json'])
+    if uploaded:
+        try:
+            data = json.load(uploaded)
+            if "data" in data and "options" in data["data"]:
+                st.success("✅ JSON carregado com sucesso!")
+                return data
         except Exception as e:
-            st.error(f"❌ Erro de processamento: {str(e)}")
-            st.info("💡 Verifique sua conexão com a internet e tente novamente.")
+            st.error(f"❌ Erro: {e}")
+    return None
 
-else:
-    st.markdown("""
-    <div style='text-align:center; padding:60px 20px;'>
-        <div style='font-size:80px; margin-bottom:20px;'>⚡</div>
-        <h2 style='color:#FFF; margin-bottom:15px;'>Pronto para Execução Institucional</h2>
-        <p style='color:#8A94A6; font-size:16px; max-width:600px; margin:0 auto 30px auto; line-height:1.6;'>
-            Clique no botão acima para puxar a matriz de opções CBOE, ajustar o Basis do SP500 para o contrato futuro (ES) e rodar a validação matemática do alvo direcional.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+# ============================================================================
+# INTERFACE PRINCIPAL
+# ============================================================================
+
+def main():
+    if 'spx_data' not in st.session_state: st.session_state.spx_data = None
+    if 'last_update' not in st.session_state: st.session_state.last_update = None
+    
+    # --- CABEÇALHO IMAGÉTICO PREMIUM ---
+    status_html = "<span style='color:#00FFAA'>● LIVE</span>" if st.session_state.spx_data else "<span style='color:#FFCC00'>● STANDBY / DEMO</span>"
+    time_html = st.session_state.last_update or '--:--:--'
+    
+    st.markdown(f"""
+<div class="header-container">
+<div>
+<h1 class='gradient-title'>GEX ULTRA ELITE PRO</h1>
+<p class='header-subtitle'>SPX Exclusive • Playbook Tático • MT5 Sync</p>
+</div>
+<div class="header-status">
+<div style="margin-bottom: 3px;">STATUS: {status_html}</div>
+<div>LAST UPDATE: {time_html}</div>
+</div>
+</div>
+""", unsafe_allow_html=True)
+    
+    # --- YAHOO FINANCE DATA ---
+    with st.spinner("📡 Sincronizando dados de mercado..."):
+        market_data = fetch_yf_data(("^VIX", "^VIX9D", "ES=F"))
+        spy_data = get_spy_analysis()
+    
+    vix_val = market_data.get("^VIX")
+    vix9d_val = market_data.get("^VIX9D")
+    es_fut = market_data.get("ES=F")
+    
+    # --- SIDEBAR LIMPA ---
+    with st.sidebar:
+        st.header("⚙️ Configurações")
+        modo_debug = st.checkbox("Modo Debug (ver Chrome)", value=False)
+        range_pct = st.slider("Range Gráfico (%):", 1, 10, 3)
+        
+        st.divider()
+        st.markdown("""
+<div style="background: linear-gradient(90deg, rgba(0,212,255,0.1), transparent); padding: 10px; border-radius: 8px; border-left: 3px solid #00D4FF; margin-bottom: 10px;">
+<h4 style="color: #00D4FF; margin: 0; font-size: 14px;">📊 MESA PROP MT5</h4>
+</div>
+""", unsafe_allow_html=True)
+        
+        default_mt5 = es_fut if es_fut else 5100.0
+        if st.session_state.spx_data:
+            default_mt5 = float(st.session_state.spx_data["data"]["last"])
+        
+        mt5_price = st.number_input("💻 Preço do ES no seu MT5:", value=default_mt5, step=0.25, format="%.2f", help="Sincroniza os cálculos e as linhas para o valor da sua corretora.")
+        usar_mt5 = st.toggle("✅ Usar MT5 para ajustar níveis", value=True)
+        
+    # --- AÇÃO DOS BOTÕES ---
+    data_to_use = st.session_state.spx_data
+    is_live = True
+    ativo = "SPX"
+    
+    if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL (SPX)", use_container_width=True, type="primary"):
+        with st.spinner("🔍 Conectando à CBOE (Motor Persistente)..."):
+            config.HEADLESS = not modo_debug
+            scraper = CBOEScraper()
+            new_data = scraper.fetch_institutional_data(ativo)
+            if new_data:
+                data_to_use = new_data
+                st.session_state.spx_data = new_data
+                st.session_state.last_update = datetime.now().strftime("%H:%M:%S")
+                st.rerun()
+            else:
+                st.error("❌ CBOE bloqueou temporariamente. Exibindo dados em cache ou modo Offline.")
+
+    # --- LÓGICA DE DADOS (DEMO VS REAL) ---
+    if not data_to_use:
+        is_live = False
+        spot = 5100.0
+        
+        strikes_demo = [4900, 4950, 5000, 5050, 5100, 5150, 5200, 5250, 5300]
+        gex_demo = [-120e6, -50e6, -200e6, -80e6, 10e6, 40e6, 180e6, 90e6, 30e6]
+        df = pd.DataFrame({'Strike': strikes_demo, 'GEX': gex_demo, 'Date': '240315'})
+        agg = df
+        levels = {
+            'zg': 5080.0, 'cw': 5200.0, 'pw': 5000.0, 'vt': 5040.0,
+            'l1': 5250.0, 'c1': 5050.0, 'c4': 4900.0,
+            'cw_0dte': 5150.0, 'pw_0dte': 5050.0
+        }
+        st.markdown('<div class="offline-banner">🟡 MODO DEMO: Exibindo perfil estrutural. Pressione o botão acima para sincronizar com o mercado real.</div>', unsafe_allow_html=True)
+    else:
+        spot = float(data_to_use["data"]["last"])
+        df = pd.DataFrame(data_to_use["data"]["options"])
+        
+        def parse_option(opt_str):
+            if not isinstance(opt_str, str): return None
+            match = re.search(r'^([a-zA-Z]+)(\d{6})([CP])(\d{8})$', opt_str)
+            if match: return {'date': match.group(2), 'type': match.group(3), 'strike': int(match.group(4)) / 1000.0}
+            return None
+            
+        parsed = df["option"].apply(parse_option)
+        df["Date"] = parsed.apply(lambda x: x['date'] if x else None)
+        df["Type"] = parsed.apply(lambda x: x['type'] if x else None)
+        df["Strike"] = parsed.apply(lambda x: x['strike'] if x else None)
+        
+        for col in ["iv", "gamma", "open_interest"]: df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+        df = df.dropna(subset=['Strike', 'Type', 'Date'])
+        
+        df['GEX'] = df['gamma'] * df['open_interest'] * 100 * spot**2 * 0.01
+        df.loc[df['Type'] == 'P', 'GEX'] *= -1
+        agg = df.groupby('Strike')['GEX'].sum().reset_index()
+        
+        calculator = GEXCalculator(spot)
+        levels = calculator.calculate_gex_levels(df)
+
+    # --- LÓGICA MT5 / BASIS ---
+    if usar_mt5 and mt5_price > 0:
+        es_real = mt5_price
+        basis = mt5_price - spot
+        preco_oficial = es_fut if es_fut else spot
+        divergencia = mt5_price - preco_oficial
+        
+        if abs(divergencia) > 5:
+            st.markdown(f'<div class="divergence-alert high">🔴 DIVERGÊNCIA CRÍTICA: O preço MT5 ({mt5_price:.2f}) está {divergencia:+.2f} pts longe do oficial.</div>', unsafe_allow_html=True)
+    else:
+        if es_fut:
+            es_real = es_fut
+            basis = es_real - spot
+        else:
+            basis = 0.0
+            es_real = spot
+        divergencia = 0
+        
+    def adj(val): return float(val) + basis
+    levels_adj = {k: adj(v) for k, v in levels.items()}
+    
+    # ========================================================================
+    # RENDERIZAÇÃO DA DASHBOARD
+    # ========================================================================
+    
+    # ROW 1: SPY, VIX e PLANO DE VOO
+    top_col1, top_col2, top_col3 = st.columns([1, 1, 2.5])
+    
+    with top_col1:
+        spy_price = spy_data.get('price', 0) if spy_data else 0
+        spy_change = spy_data.get('change_pct', 0) if spy_data else 0
+        color_spy = "#00FFAA" if spy_change > 0 else "#ff6b6b"
+        st.markdown(f"""
+<div class="metric-card" style="border-left: 3px solid {color_spy}; height: 100%;">
+<div style="font-size:11px; color:#8A94A6; font-weight:700; letter-spacing: 1px;">SPY (ETF)</div>
+<div style="font-size:28px; font-weight:700; color:{color_spy}; font-family:JetBrains Mono; margin-top: 10px;">${spy_price:.2f}</div>
+<div style="font-size:12px; color:#b0b8c8; margin-top: 5px;">Trend: {spy_change:+.2f}%</div>
+</div>
+""", unsafe_allow_html=True)
+        
+    with top_col2:
+        vix_color = "#ff6b6b" if (vix_val and vix_val > 20) else "#00FFAA"
+        v9 = vix9d_val if vix9d_val else 0
+        v = vix_val if vix_val else 0
+        st.markdown(f"""
+<div class="metric-card" style="border-left: 3px solid {vix_color}; height: 100%;">
+<div style="font-size:11px; color:#8A94A6; font-weight:700; letter-spacing: 1px;">VIX SPOT</div>
+<div style="font-size:28px; font-weight:700; color:{vix_color}; font-family:JetBrains Mono; margin-top: 10px;">{v:.2f}</div>
+<div style="font-size:12px; color:#b0b8c8; margin-top: 5px;">VIX9D: {v9:.2f}</div>
+</div>
+""", unsafe_allow_html=True)
+        
+    with top_col3:
+        signal_gen = SignalGenerator(spot, basis, levels, spy_data)
+        if vix_val and vix9d_val: signal_gen.add_vix_data(vix_val, vix9d_val)
+        signal = signal_gen.generate()
+        st.markdown(signal.to_html(), unsafe_allow_html=True)
+
+    # ROW 2: PAINEL DE CÓPIA RÁPIDA
+    st.markdown("<h3 style='margin-top: 20px; font-size: 16px; color: #FFFFFF; font-weight: 600;'><span style='color:#00D4FF;'>📋 EXPORTAÇÃO:</span> Passe o mouse sobre o número e clique no ícone para copiar.</h3>", unsafe_allow_html=True)
+    
+    cp_col1, cp_col2, cp_col3, cp_col4 = st.columns(4)
+    
+    with cp_col1:
+        st.markdown("<div class='copy-panel-title'>MACRO WALLS</div>", unsafe_allow_html=True)
+        st.caption("Call Wall Principal")
+        st.code(f"{levels_adj['cw']:.2f}", language=None)
+        st.caption("Put Wall Principal")
+        st.code(f"{levels_adj['pw']:.2f}", language=None)
+        
+    with cp_col2:
+        st.markdown("<div class='copy-panel-title'>INFLEXÃO & RISCO</div>", unsafe_allow_html=True)
+        st.caption("Zero Gama (Divisa de Tendência)")
+        st.code(f"{levels_adj['zg']:.2f}", language=None)
+        st.caption("Vol Trigger (Gatilho de Queda)")
+        st.code(f"{levels_adj['vt']:.2f}", language=None)
+        
+    with cp_col3:
+        st.markdown("<div class='copy-panel-title'>MICRO 0DTE</div>", unsafe_allow_html=True)
+        st.caption("Call Wall (0DTE)")
+        st.code(f"{levels_adj['cw_0dte']:.2f}", language=None)
+        st.caption("Put Wall (0DTE)")
+        st.code(f"{levels_adj['pw_0dte']:.2f}", language=None)
+        
+    with cp_col4:
+        st.markdown("<div class='copy-panel-title'>SUPORTE/RESISTÊNCIA</div>", unsafe_allow_html=True)
+        st.caption("Nível L1 (Top Call Secundária)")
+        st.code(f"{levels_adj['l1']:.2f}", language=None)
+        st.caption("Nível C1 (Suporte Secundário)")
+        st.code(f"{levels_adj['c1']:.2f}", language=None)
+
+    # ROW 3: Gráfico Visual
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader("📊 Perfil Institucional (Gamma Exposure)")
+    
+    mask = (agg['Strike'] > spot * (1 - range_pct/100)) & (agg['Strike'] < spot * (1 + range_pct/100))
+    chart_data = agg[mask].copy()
+    chart_data['Strike'] = chart_data['Strike'] + basis 
+    
+    lines_data = pd.DataFrame([
+        {'Strike': levels_adj['zg'], 'Level': 'ZG', 'Color': '#FFFFFF'},
+        {'Strike': levels_adj['vt'], 'Level': 'VT', 'Color': '#00D4FF'},
+        {'Strike': levels_adj['cw'], 'Level': 'CW', 'Color': '#FF6B6B'},
+        {'Strike': levels_adj['pw'], 'Level': 'PW', 'Color': '#00FF44'}
+    ])
+    
+    chart = alt.Chart(chart_data).mark_bar().encode(
+        x=alt.X('Strike:Q', title='Preço do Ativo (Ajustado ao seu MT5)', scale=alt.Scale(zero=False)),
+        y=alt.Y('GEX:Q', title='Exposição Líquida em Dólares ($)'),
+        color=alt.condition(alt.datum.GEX > 0, alt.value('#00FFAA'), alt.value('#ff6b6b')),
+        tooltip=['Strike', 'GEX']
+    ).properties(height=380)
+    
+    rules = alt.Chart(lines_data).mark_rule(strokeDash=[5,5], strokeWidth=2).encode(
+        x='Strike:Q',
+        color=alt.Color('Color:N', scale=None),
+        tooltip=['Level', 'Strike']
+    )
+    st.altair_chart(chart + rules, use_container_width=True)
+
+    # ROW 4: Exportação Pine Script
+    with st.expander("🖥️ PINE SCRIPT (Exportar para TradingView)"):
+        pine_code = generate_pine_script(levels, basis, datetime.now())
+        st.code(pine_code, language="pine")
+        st.download_button(label="📥 Download .pine", data=pine_code, file_name=f"GEX_ELITE_{datetime.now().strftime('%Y%m%d')}.pine", mime="text/plain")
+
+    # Footer
+    st.divider()
+    mt5_status = f"Sincronizado ({mt5_price:.2f})" if usar_mt5 else "Desativado"
+    live_status = "ONLINE (LIVE)" if is_live else "OFFLINE (DEMO)"
+    st.markdown(f"""
+<div style="text-align:center; font-size:11px; color:#5a6478; font-family:JetBrains Mono; text-transform: uppercase;">
+GEX ULTRA ELITE PRO | Status: {live_status} | MT5 Sync: {mt5_status}
+</div>
+""", unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
