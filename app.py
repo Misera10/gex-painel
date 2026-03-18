@@ -702,4 +702,96 @@ def main():
         v9 = vix9d_val if vix9d_val else 0
         v = vix_val if vix_val else 0
         st.markdown(f"""
-<div class="metric-card" style="border-left: 3px solid {
+<div class="metric-card" style="border-left: 3px solid {vix_color}; height: 100%;">
+<div style="font-size:11px; color:#8A94A6; font-weight:700; letter-spacing: 1px;">VIX SPOT</div>
+<div style="font-size:28px; font-weight:700; color:{vix_color}; font-family:JetBrains Mono; margin-top: 10px;">{v:.2f}</div>
+<div style="font-size:12px; color:#b0b8c8; margin-top: 5px;">VIX9D: {v9:.2f}</div>
+</div>
+""", unsafe_allow_html=True)
+        
+    with top_col3:
+        signal_gen = SignalGenerator(spot, basis, levels, spy_data)
+        if vix_val and vix9d_val: signal_gen.add_vix_data(vix_val, vix9d_val)
+        signal = signal_gen.generate()
+        st.markdown(signal.to_html(), unsafe_allow_html=True)
+
+    # ROW 2: PAINEL DE CÓPIA RÁPIDA
+    st.markdown("<h3 style='margin-top: 20px; font-size: 16px; color: #FFFFFF; font-weight: 600;'><span style='color:#00D4FF;'>📋 EXPORTAÇÃO:</span> Passe o mouse sobre o número e clique no ícone para copiar as taxas ajustadas para o seu MT5.</h3>", unsafe_allow_html=True)
+    
+    cp_col1, cp_col2, cp_col3, cp_col4 = st.columns(4)
+    
+    with cp_col1:
+        st.markdown("<div class='copy-panel-title'>MACRO WALLS</div>", unsafe_allow_html=True)
+        st.caption("Call Wall Principal")
+        st.code(f"{levels_adj['cw']:.2f}", language=None)
+        st.caption("Put Wall Principal")
+        st.code(f"{levels_adj['pw']:.2f}", language=None)
+        
+    with cp_col2:
+        st.markdown("<div class='copy-panel-title'>INFLEXÃO & RISCO</div>", unsafe_allow_html=True)
+        st.caption("Zero Gama (Divisa de Tendência)")
+        st.code(f"{levels_adj['zg']:.2f}", language=None)
+        st.caption("Vol Trigger (Gatilho de Queda)")
+        st.code(f"{levels_adj['vt']:.2f}", language=None)
+        
+    with cp_col3:
+        st.markdown("<div class='copy-panel-title'>MICRO 0DTE</div>", unsafe_allow_html=True)
+        st.caption("Call Wall (0DTE)")
+        st.code(f"{levels_adj['cw_0dte']:.2f}", language=None)
+        st.caption("Put Wall (0DTE)")
+        st.code(f"{levels_adj['pw_0dte']:.2f}", language=None)
+        
+    with cp_col4:
+        st.markdown("<div class='copy-panel-title'>SUPORTE/RESISTÊNCIA</div>", unsafe_allow_html=True)
+        st.caption("Nível L1 (Top Call Secundária)")
+        st.code(f"{levels_adj['l1']:.2f}", language=None)
+        st.caption("Nível C1 (Suporte Secundário)")
+        st.code(f"{levels_adj['c1']:.2f}", language=None)
+
+    # ROW 3: Gráfico Visual
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader("📊 Perfil Institucional (Gamma Exposure)")
+    
+    mask = (agg['Strike'] > spot * (1 - range_pct/100)) & (agg['Strike'] < spot * (1 + range_pct/100))
+    chart_data = agg[mask].copy()
+    chart_data['Strike'] = chart_data['Strike'] + basis 
+    
+    lines_data = pd.DataFrame([
+        {'Strike': levels_adj['zg'], 'Level': 'ZG', 'Color': '#FFFFFF'},
+        {'Strike': levels_adj['vt'], 'Level': 'VT', 'Color': '#00D4FF'},
+        {'Strike': levels_adj['cw'], 'Level': 'CW', 'Color': '#FF6B6B'},
+        {'Strike': levels_adj['pw'], 'Level': 'PW', 'Color': '#00FF44'}
+    ])
+    
+    chart = alt.Chart(chart_data).mark_bar().encode(
+        x=alt.X('Strike:Q', title='Preço do Ativo (Ajustado ao seu MT5)', scale=alt.Scale(zero=False)),
+        y=alt.Y('GEX:Q', title='Exposição Líquida em Dólares ($)'),
+        color=alt.condition(alt.datum.GEX > 0, alt.value('#00FFAA'), alt.value('#ff6b6b')),
+        tooltip=['Strike', 'GEX']
+    ).properties(height=380)
+    
+    rules = alt.Chart(lines_data).mark_rule(strokeDash=[5,5], strokeWidth=2).encode(
+        x='Strike:Q',
+        color=alt.Color('Color:N', scale=None),
+        tooltip=['Level', 'Strike']
+    )
+    st.altair_chart(chart + rules, use_container_width=True)
+
+    # ROW 4: Exportação Pine Script
+    with st.expander("🖥️ PINE SCRIPT (Exportar para TradingView)"):
+        pine_code = generate_pine_script(levels, basis, datetime.now())
+        st.code(pine_code, language="pine")
+        st.download_button(label="📥 Download .pine", data=pine_code, file_name=f"GEX_ELITE_{datetime.now().strftime('%Y%m%d')}.pine", mime="text/plain")
+
+    # Footer
+    st.divider()
+    mt5_status = f"Sincronizado ({mt5_price:.2f})" if usar_mt5 else "Desativado"
+    live_status = "ONLINE (LIVE)" if is_live else "OFFLINE (DEMO)"
+    st.markdown(f"""
+<div style="text-align:center; font-size:11px; color:#5a6478; font-family:JetBrains Mono; text-transform: uppercase;">
+GEX ULTRA ELITE PRO | Status: {live_status} | MT5 Sync: {mt5_status}
+</div>
+""", unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
