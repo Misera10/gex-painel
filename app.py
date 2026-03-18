@@ -1,6 +1,6 @@
 """
 GEX ULTRA ELITE TERMINAL PRO (v5.5 - Full Bridge Edition)
-Features: Dashboard Completa | Playbook Tático | MT5 Sync | Gráfico de Gamma | Pine Script
+Dashboard Completa | Playbook Tático | MT5 Sync | Gráfico de Gamma | Pine Script
 """
 
 import streamlit as st
@@ -15,7 +15,7 @@ from datetime import datetime
 from scipy.stats import norm
 
 # ============================================================================
-# 1. CONFIGURAÇÕES VISUAIS PREMIUM (O DESIGN QUE VOCÊ QUER)
+# 1. CONFIGURAÇÕES VISUAIS PREMIUM
 # ============================================================================
 st.set_page_config(page_title="GEX ULTRA ELITE PRO", page_icon="⚡", layout="wide")
 
@@ -41,7 +41,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# 2. LÓGICA MATEMÁTICA INSTITUCIONAL
+# 2. LÓGICA DE CÁLCULO INSTITUCIONAL
 # ============================================================================
 class GEXCalculator:
     def __init__(self, spot: float):
@@ -52,7 +52,7 @@ class GEXCalculator:
         agg = df.groupby('Strike')['GEX'].sum().reset_index()
         strikes, gex_vals = agg['Strike'].values, agg['GEX'].values
         
-        # Zero Gamma (Cálculo de Inflexão)
+        # Zero Gamma (Ponto de Inflexão)
         zg = self._find_zero(strikes, gex_vals)
         cw = agg.loc[agg['GEX'].idxmax(), 'Strike']
         pw = agg.loc[agg['GEX'].idxmin(), 'Strike']
@@ -61,9 +61,8 @@ class GEXCalculator:
         vt = agg[(agg['Strike'] > min(pw, zg)) & (agg['Strike'] < max(pw, zg))]['Strike'].mean() or (pw + 10)
         l1 = agg.nlargest(2, 'GEX')['Strike'].iloc[-1]
         c1 = agg[agg['Strike'] > pw].nsmallest(1, 'GEX')['Strike'].iloc[0] if not agg[agg['Strike'] > pw].empty else pw
-        c4 = agg[agg['Strike'] < pw].nsmallest(1, 'GEX')['Strike'].iloc[0] if not agg[agg['Strike'] < pw].empty else pw - 20
         
-        return {'zg': zg, 'cw': cw, 'pw': pw, 'vt': vt, 'l1': l1, 'c1': c1, 'c4': c4}
+        return {'zg': zg, 'cw': cw, 'pw': pw, 'vt': vt, 'l1': l1, 'c1': c1}
 
     def _find_zero(self, x, y):
         s = np.sign(y)
@@ -73,16 +72,16 @@ class GEXCalculator:
         return x[idx] - y[idx] * (x[idx+1] - x[idx]) / (y[idx+1] - y[idx])
 
 # ============================================================================
-# 3. INTERFACE E BRIDGE (COM CORREÇÃO NGROK)
+# 3. INTERFACE E BRIDGE
 # ============================================================================
 def main():
     if 'spx_data' not in st.session_state: st.session_state.spx_data = None
     if 'last_update' not in st.session_state: st.session_state.last_update = None
 
-    # Header
+    # Header Premium
     st.markdown(f"""
     <div class="header-container">
-    <div><h1 class='gradient-title'>GEX ULTRA ELITE PRO</h1><p style='color:#8A94A6; font-size:12px; font-family:monospace; letter-spacing:2px;'>v5.5 BRIDGE • FULL INSTITUTIONAL TERMINAL</p></div>
+    <div><h1 class='gradient-title'>GEX ULTRA ELITE PRO</h1><p style='color:#8A94A6; font-size:12px; font-family:monospace; letter-spacing:2px;'>v5.5 BRIDGE • INSTITUTIONAL TERMINAL</p></div>
     <div style='text-align:right; color:#8A94A6; font-family:monospace;'>
         STATUS: {"<span style='color:#00FFAA'>● LIVE</span>" if st.session_state.spx_data else "<span style='color:#FFCC00'>● STANDBY</span>"}<br>
         SYNC: {st.session_state.last_update or '--:--:--'}
@@ -91,39 +90,38 @@ def main():
     """, unsafe_allow_html=True)
 
     with st.sidebar:
-        st.header("⚙️ Configurações MT5")
+        st.header("⚙️ Configurações")
         bridge_url = st.text_input("🔗 Link do Colab (Ngrok):", placeholder="https://xxxx.ngrok-free.app/spx")
-        mt5_price = st.number_input("💻 Preço Atual (ES/MT5):", value=5100.0, step=0.25)
+        mt5_price = st.number_input("💻 Preço ES no MT5:", value=5100.0, step=0.25)
         st.divider()
-        range_pct = st.slider("Range do Gráfico (%):", 1, 10, 3)
+        range_pct = st.slider("Range Gráfico (%):", 1, 10, 3)
 
     if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL (SINCRONIZAR)"):
         if not bridge_url:
-            st.error("Cole o link do Colab na lateral!")
+            st.error("Cole o link do Colab na barra lateral!")
         else:
             url = bridge_url.strip()
             if not url.endswith("/spx"): url += "/spx"
-            with st.spinner("Conectando à Ponte de Dados..."):
+            with st.spinner("Puxando dados institucionais via Bridge..."):
                 try:
-                    # Header para pular o aviso do Ngrok
                     h = {"ngrok-skip-browser-warning": "true"}
                     r = requests.get(url, headers=h, timeout=30)
                     if r.status_code == 200:
                         st.session_state.spx_data = r.json()
                         st.session_state.last_update = time.strftime("%H:%M:%S")
-                        st.success("DADOS SINCRONIZADOS!")
-                    else: st.error(f"Erro na ponte: {r.status_code}")
+                        st.success("MATRIZ SINCRONIZADA!")
+                    else: st.error(f"Erro {r.status_code}: Verifique o Colab.")
                 except Exception as e: st.error(f"Falha: {e}")
 
     # ========================================================================
-    # 4. RENDERIZAÇÃO DAS FUNCIONALIDADES (GEX v5.3 STYLE)
+    # 4. DASHBOARD E GRÁFICOS
     # ========================================================================
     if st.session_state.spx_data:
         data = st.session_state.spx_data
         spot = float(data["data"]["last"])
         basis = mt5_price - spot
         
-        # Processamento de Gamma
+        # Processamento de Dados
         df = pd.DataFrame(data["data"]["options"])
         df['Strike'] = df['option'].apply(lambda x: int(re.search(r'(\d{8})$', x).group(1))/1000 if re.search(r'(\d{8})$', x) else 0)
         df['Type'] = df['option'].apply(lambda x: 'C' if 'C' in x else 'P')
@@ -136,37 +134,35 @@ def main():
         lv = calc.calculate_levels(df)
         def adj(v): return v + basis
 
-        # --- ROW 1: METRICS & PLAYBOOK ---
-        m1, m2, playbook_col = st.columns([1, 1, 2.5])
-        with m1:
+        # --- MÉTRICAS E PLAYBOOK ---
+        col_m1, col_m2, col_pb = st.columns([1, 1, 2.5])
+        with col_m1:
             st.markdown(f"<div class='metric-card'><span style='color:#8A94A6; font-size:12px;'>SPX SPOT</span><br><b style='font-size:26px; color:white;'>${spot:,.2f}</b></div>", unsafe_allow_html=True)
-        with m2:
-            st.markdown(f"<div class='metric-card'><span style='color:#8A94A6; font-size:12px;'>MT5 BASIS</span><br><b style='font-size:26px; color:#00D4FF;'>{basis:+.2f}</b></div>", unsafe_allow_html=True)
+        with col_m2:
+            st.markdown(f"<div class='metric-card'><span style='color:#8A94A6; font-size:12px;'>BASIS MT5</span><br><b style='font-size:26px; color:#00D4FF;'>{basis:+.2f}</b></div>", unsafe_allow_html=True)
         
-        with playbook_col:
-            is_bull = mt5_price > adj(lv['zg'])
-            color = "#00FFAA" if is_bull else "#FF4444"
+        with col_pb:
+            viés = "LONG 📈" if mt5_price > adj(lv['zg']) else "SHORT 📉"
+            cor = "#00FFAA" if viés == "LONG 📈" else "#FF4444"
             st.markdown(f"""
-            <div class="playbook-container" style="border-left: 6px solid {color};">
-            <div style="font-size:24px; font-weight:900; color:{color};">VIÉS: {"COMPRADOR (LONG)" if is_bull else "VENDEDOR (SHORT)"}</div>
-            <div style="font-size:12px; color:#8A94A6; font-style:italic; margin-bottom:10px;">Regime de {"Call Gamma (Estável)" if is_bull else "Put Gamma (Volátil)"}</div>
+            <div class="playbook-container" style="border-left: 6px solid {cor};">
+            <div style="font-size:24px; font-weight:900; color:{cor};">VIÉS: {viés}</div>
             <div class="playbook-grid">
-                <div class="playbook-item"><div style="font-size:10px; color:#8A94A6;">ENTRADA</div><b style="color:white;">{adj(lv['zg']):.2f}</b></div>
-                <div class="playbook-item"><div style="font-size:10px; color:#8A94A6;">ALVO</div><b style="color:white;">{adj(lv['cw'] if is_bull else lv['pw']):.2f}</b></div>
-                <div class="playbook-item"><div style="font-size:10px; color:#8A94A6;">STOP</div><b style="color:white;">{adj(lv['vt']):.2f}</b></div>
+                <div class="playbook-item"><div style="font-size:10px; color:#8A94A6;">ENTRADA</div><b>{adj(lv['zg']):.2f}</b></div>
+                <div class="playbook-item"><div style="font-size:10px; color:#8A94A6;">ALVO</div><b>{adj(lv['cw'] if viés == "LONG 📈" else lv['pw']):.2f}</b></div>
+                <div class="playbook-item"><div style="font-size:10px; color:#8A94A6;">STOP</div><b>{adj(lv['vt']):.2f}</b></div>
             </div></div>""", unsafe_allow_html=True)
 
-        # --- ROW 2: COPY PANEL (TAXAS MT5) ---
-        st.markdown("<div class='copy-panel-title'>📋 NÍVEIS MT5 (COPIAR PARA O TERMINAL)</div>", unsafe_allow_html=True)
-        x1, x2, x3, x4, x5 = st.columns(5)
-        x1.caption("Call Wall (CW)"); x1.code(f"{adj(lv['cw']):.2f}", language=None)
-        x2.caption("Zero Gamma (ZG)"); x2.code(f"{adj(lv['zg']):.2f}", language=None)
-        x3.caption("Vol Trigger (VT)"); x3.code(f"{adj(lv['vt']):.2f}", language=None)
-        x4.caption("Nível C1"); x4.code(f"{adj(lv['c1']):.2f}", language=None)
-        x5.caption("Put Wall (PW)"); x5.code(f"{adj(lv['pw']):.2f}", language=None)
+        # --- NÍVEIS MT5 ---
+        st.markdown("<div class='copy-panel-title'>📋 NÍVEIS MT5 (TAXAS INSTITUCIONAIS)</div>", unsafe_allow_html=True)
+        x1, x2, x3, x4 = st.columns(4)
+        x1.caption("Call Wall"); x1.code(f"{adj(lv['cw']):.2f}", language=None)
+        x2.caption("Zero Gamma"); x2.code(f"{adj(lv['zg']):.2f}", language=None)
+        x3.caption("Vol Trigger"); x3.code(f"{adj(lv['vt']):.2f}", language=None)
+        x4.caption("Put Wall"); x4.code(f"{adj(lv['pw']):.2f}", language=None)
 
-        # --- ROW 3: GRÁFICO ALTAIR ---
-        st.subheader("📊 Perfil de Exposição (Gamma Exposure)")
+        # --- GRÁFICO ALTAIR ---
+        st.subheader("📊 Perfil de Gamma Exposure")
         agg = df.groupby('Strike')['GEX'].sum().reset_index()
         mask = (agg['Strike'] > spot * (1 - range_pct/100)) & (agg['Strike'] < spot * (1 + range_pct/100))
         chart_data = agg[mask].copy()
@@ -175,21 +171,9 @@ def main():
         chart = alt.Chart(chart_data).mark_bar().encode(
             x=alt.X('Strike_MT5:Q', title='Strike Ajustado MT5', scale=alt.Scale(zero=False)),
             y=alt.Y('GEX:Q', title='Exposição ($)'),
-            color=alt.condition(alt.datum.GEX > 0, alt.value('#00FFAA'), alt.value('#FF4444')),
-            tooltip=['Strike_MT5', 'GEX']
-        ).properties(height=350)
-        
-        # Linha do Preço Atual
-        rule = alt.Chart(pd.DataFrame({'x': [mt5_price]})).mark_rule(color='white', strokeDash=[5,5]).encode(x='x:Q')
-        st.altair_chart(chart + rule, use_container_width=True)
-
-        # --- ROW 4: PINE SCRIPT ---
-        with st.expander("🖥️ EXPORTAR PINE SCRIPT (TRADINGVIEW)"):
-            pine = f'//@version=5\nindicator("GEX Levels", overlay=true)\n'
-            pine += f'plot({adj(lv["zg"]):.2f}, "ZG", color.white, 2)\n'
-            pine += f'plot({adj(lv["cw"]):.2f}, "CW", color.red, 2)\n'
-            pine += f'plot({adj(lv["pw"]):.2f}, "PW", color.green, 2)'
-            st.code(pine, language="pine")
+            color=alt.condition(alt.datum.GEX > 0, alt.value('#00FFAA'), alt.value('#FF4444'))
+        ).properties(height=380)
+        st.altair_chart(chart, use_container_width=True)
 
 if __name__ == "__main__":
     main()
