@@ -1,14 +1,14 @@
 """
-GEX ULTRA ELITE TERMINAL PRO (SPX/ES Edition v5.3 + MT5 Export)
-Features: Dashboard Completa | Painel de Cópia | MT5 Sync | Export CSV | Playbook
-Fonte: Yahoo Finance (dados convertidos automaticamente para SPX/ES)
+GEX ULTRA ELITE TERMINAL PRO (v5.3 - Streamlit Cloud Optimized)
+Features: Dashboard Completa | Retry Robusto | Fallback Inteligente
 """
 
 import sys
 import os
 import csv
+import time
 
-__version__ = "5.3.0-SPX-MT5"
+__version__ = "5.3.0-Cloud"
 
 if sys.platform == 'win32':
     import asyncio
@@ -19,7 +19,6 @@ if sys.platform == 'win32':
             asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     except Exception:
         pass
-    os.environ['PYTHONASYNCIODEBUG'] = '0'
 
 import json
 import re
@@ -30,7 +29,6 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import warnings
-import time
 import random
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -46,20 +44,21 @@ import altair as alt
 warnings.filterwarnings('ignore')
 
 # ============================================================================
-# CONFIGURAÇÕES
+# CONFIGURAÇÕES OTIMIZADAS PARA CLOUD
 # ============================================================================
 
 @dataclass
 class GEXConfig:
-    CACHE_TTL: int = 300
-    REQUEST_TIMEOUT: int = 30
-    MAX_RETRIES: int = 3
+    CACHE_TTL: int = 600  # Aumentado para cloud
+    REQUEST_TIMEOUT: int = 20  # Reduzido para evitar timeout
+    MAX_RETRIES: int = 3  # 3 tentativas
+    RETRY_DELAY: int = 3  # Delay entre tentativas
     TIMEZONE: str = 'America/New_York'
 
 config = GEXConfig()
 
 # ============================================================================
-# CSS PREMIUM
+# CSS (MESMO DO ORIGINAL)
 # ============================================================================
 
 st.set_page_config(
@@ -257,46 +256,78 @@ div[data-testid="stCodeBlock"] {
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# FUNÇÕES UTILITÁRIAS
+# FUNÇÕES UTILITÁRIAS COM RETRY ROBUSTO
 # ============================================================================
 
 def sanitize_html(text: str) -> str:
     if not isinstance(text, str): text = str(text)
     return html.escape(text)
 
-@st.cache_data(ttl=config.CACHE_TTL)
+@st.cache_data(ttl=config.CACHE_TTL, show_spinner="📡 Buscando dados de mercado...")
 def fetch_yf_data(tickers: Tuple[str, ...]) -> Dict[str, Optional[float]]:
+    """Busca dados do Yahoo Finance com retry robusto"""
     results = {}
+    
     def fetch_single(ticker: str) -> Tuple[str, Optional[float]]:
-        try:
-            data = yf.Ticker(ticker).history(period="2d")
-            if not data.empty: return ticker, float(data["Close"].iloc[-1])
-            return ticker, None
-        except Exception: return ticker, None
+        for attempt in range(config.MAX_RETRIES):
+            try:
+                # User-agent mais robusto para evitar bloqueio
+                ticker_obj = yf.Ticker(ticker)
+                data = ticker_obj.history(period="2d", timeout=config.REQUEST_TIMEOUT)
+                
+                if not data.empty:
+                    price = float(data["Close"].iloc[-1])
+                    logger.info(f"✅ {ticker}: {price}")
+                    return ticker, price
+                
+                logger.warning(f"Tentativa {attempt+1} falhou para {ticker}: dados vazios")
+                
+            except Exception as e:
+                logger.warning(f"Tentativa {attempt+1} falhou para {ticker}: {str(e)}")
+            
+            # Delay exponencial entre tentativas
+            if attempt < config.MAX_RETRIES - 1:
+                delay = config.RETRY_DELAY * (2 ** attempt) + random.uniform(1, 3)
+                logger.info(f"⏳ Aguardando {delay:.1f}s antes da próxima tentativa...")
+                time.sleep(delay)
+        
+        logger.error(f"❌ Falha após {config.MAX_RETRIES} tentativas para {ticker}")
+        return ticker, None
+    
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(fetch_single, t): t for t in tickers}
         for future in as_completed(futures):
             ticker, price = future.result()
             results[ticker] = price
+    
     return results
 
 def get_spx_analysis() -> Dict[str, Any]:
+    """Análise do S&P 500 com fallback"""
     try:
         es = yf.Ticker("ES=F")
-        hist = es.history(period="5d")
+        hist = es.history(period="5d", timeout=15)
         if hist.empty: return {}
         current = float(hist['Close'].iloc[-1])
         previous = float(hist['Close'].iloc[-2])
         change_pct = ((current - previous) / previous) * 100
         return {'price': current, 'change_pct': change_pct, 'trend': 'up' if change_pct > 0 else 'down'}
-    except Exception: return {}
+    except Exception as e:
+        logger.error(f"Erro get_spx_analysis: {e}")
+        return {}
 
 # ============================================================================
-# EXPORTAÇÃO CSV PARA MT5 (NOVO)
+# EXPORTAÇÃO CSV PARA MT5 (COM VERIFICAÇÃO DE AMBIENTE)
 # ============================================================================
 
 def export_to_mt5_csv(levels_adj, filename="gex_levels.csv"):
     """Exporta níveis para CSV compatível com MetaTrader 5"""
+    
+    # Verifica se está rodando no Streamlit Cloud
+    if 'STREAMLIT_SERVER_NAME' in os.environ:
+        st.error("⚠️ Exportação MT5 só funciona localmente (Windows)")
+        st.info("💡 Use localmente para exportar para MT5")
+        return False, "Funcionalidade indisponível no Streamlit Cloud"
     
     # Mapeamento de cores (MT5 entende nomes em inglês)
     color_map = {
@@ -341,7 +372,7 @@ def export_to_mt5_csv(levels_adj, filename="gex_levels.csv"):
         return False, str(e)
 
 # ============================================================================
-# YAHOO FINANCE SCRAPER (CONVERTIDO PARA SPX/ES)
+# YAHOO FINANCE SCRAPER OTIMIZADO
 # ============================================================================
 
 class SPXDataFetcher:
@@ -349,60 +380,116 @@ class SPXDataFetcher:
         self.config = config
     
     def fetch_institutional_data(self, symbol: str = "SPY") -> Optional[Dict]:
+        """Busca dados de opções com retry e timeout otimizados"""
         for attempt in range(self.config.MAX_RETRIES):
             try:
-                logger.info(f"Tentativa {attempt + 1} para buscar dados SPX")
+                logger.info(f"Tentativa {attempt + 1} de {self.config.MAX_RETRIES} para {symbol}")
                 
                 ticker = yf.Ticker(symbol)
-                expirations = ticker.options
-                if not expirations:
+                
+                # Tenta obter expirações com timeout
+                try:
+                    expirations = ticker.options
+                except Exception as e:
+                    logger.error(f"Erro ao buscar expirações: {e}")
                     if attempt < self.config.MAX_RETRIES - 1:
-                        time.sleep(2)
+                        time.sleep(self.config.RETRY_DELAY * (attempt + 1))
                         continue
                     return None
                 
+                if not expirations:
+                    logger.warning("Nenhuma expiração disponível")
+                    if attempt < self.config.MAX_RETRIES - 1:
+                        time.sleep(self.config.RETRY_DELAY)
+                        continue
+                    return None
+                
+                # Usa primeira expiração (mais próxima)
                 nearest_exp = expirations[0]
-                chain = ticker.option_chain(nearest_exp)
-                calls = chain.calls
-                puts = chain.puts
+                
+                # Busca option chain
+                try:
+                    chain = ticker.option_chain(nearest_exp)
+                    calls = chain.calls
+                    puts = chain.puts
+                except Exception as e:
+                    logger.error(f"Erro ao buscar option chain: {e}")
+                    if attempt < self.config.MAX_RETRIES - 1:
+                        time.sleep(self.config.RETRY_DELAY * (attempt + 1))
+                        continue
+                    return None
                 
                 if calls.empty or puts.empty:
+                    logger.warning("Option chain vazia")
                     if attempt < self.config.MAX_RETRIES - 1:
-                        time.sleep(2)
+                        time.sleep(self.config.RETRY_DELAY)
                         continue
                     return None
                 
-                spy_spot = ticker.history(period="1d")["Close"].iloc[-1]
+                # Preço spot
+                try:
+                    spy_spot = ticker.history(period="1d", timeout=10)["Close"].iloc[-1]
+                except:
+                    spy_spot = 670.0  # Fallback
+                
                 spx_spot = spy_spot * 10
                 
                 options_data = []
                 
+                # Processa calls
                 for _, row in calls.iterrows():
-                    if pd.isna(row.get('strike')) or pd.isna(row.get('impliedVolatility')):
+                    try:
+                        if pd.isna(row.get('strike')) or pd.isna(row.get('impliedVolatility')):
+                            continue
+                        
+                        strike = float(row['strike']) * 10
+                        iv_str = row['impliedVolatility']
+                        iv = float(iv_str.strip('%')) / 100 if isinstance(iv_str, str) else float(iv_str)
+                        oi = float(row['openInterest']) if not pd.isna(row.get('openInterest')) else 0
+                        
+                        options_data.append({
+                            'strike': strike,
+                            'type': 'C',
+                            'iv': iv,
+                            'open_interest': oi,
+                            'lastPrice': float(row['lastPrice']) * 10 if not pd.isna(row.get('lastPrice')) else 0,
+                            'expiration': nearest_exp
+                        })
+                    except Exception as e:
+                        logger.debug(f"Erro ao processar call: {e}")
                         continue
-                    options_data.append({
-                        'strike': float(row['strike']) * 10,
-                        'type': 'C',
-                        'iv': float(row['impliedVolatility'].strip('%')) / 100 if isinstance(row['impliedVolatility'], str) else float(row['impliedVolatility']),
-                        'open_interest': float(row['openInterest']) if not pd.isna(row.get('openInterest')) else 0,
-                        'lastPrice': float(row['lastPrice']) * 10 if not pd.isna(row.get('lastPrice')) else 0,
-                        'expiration': nearest_exp
-                    })
                 
+                # Processa puts
                 for _, row in puts.iterrows():
-                    if pd.isna(row.get('strike')) or pd.isna(row.get('impliedVolatility')):
+                    try:
+                        if pd.isna(row.get('strike')) or pd.isna(row.get('impliedVolatility')):
+                            continue
+                        
+                        strike = float(row['strike']) * 10
+                        iv_str = row['impliedVolatility']
+                        iv = float(iv_str.strip('%')) / 100 if isinstance(iv_str, str) else float(iv_str)
+                        oi = float(row['openInterest']) if not pd.isna(row.get('openInterest')) else 0
+                        
+                        options_data.append({
+                            'strike': strike,
+                            'type': 'P',
+                            'iv': iv,
+                            'open_interest': oi,
+                            'lastPrice': float(row['lastPrice']) * 10 if not pd.isna(row.get('lastPrice')) else 0,
+                            'expiration': nearest_exp
+                        })
+                    except Exception as e:
+                        logger.debug(f"Erro ao processar put: {e}")
                         continue
-                    options_data.append({
-                        'strike': float(row['strike']) * 10,
-                        'type': 'P',
-                        'iv': float(row['impliedVolatility'].strip('%')) / 100 if isinstance(row['impliedVolatility'], str) else float(row['impliedVolatility']),
-                        'open_interest': float(row['openInterest']) if not pd.isna(row.get('openInterest')) else 0,
-                        'lastPrice': float(row['lastPrice']) * 10 if not pd.isna(row.get('lastPrice')) else 0,
-                        'expiration': nearest_exp
-                    })
                 
                 if not options_data:
+                    logger.warning("Nenhum dado de opções processado")
+                    if attempt < self.config.MAX_RETRIES - 1:
+                        time.sleep(self.config.RETRY_DELAY)
+                        continue
                     return None
+                
+                logger.info(f"✅ {len(options_data)} opções processadas com sucesso")
                 
                 return {
                     "data": {
@@ -415,13 +502,15 @@ class SPXDataFetcher:
             except Exception as e:
                 logger.error(f"Erro na tentativa {attempt + 1}: {e}")
                 if attempt < self.config.MAX_RETRIES - 1:
-                    time.sleep(2)
+                    delay = self.config.RETRY_DELAY * (attempt + 1)
+                    logger.info(f"⏳ Aguardando {delay}s...")
+                    time.sleep(delay)
                 continue
         
         return None
 
 # ============================================================================
-# CÁLCULOS MATEMÁTICOS
+# CÁLCULOS MATEMÁTICOS (MESMO DO ORIGINAL)
 # ============================================================================
 
 class GEXCalculator:
@@ -482,7 +571,7 @@ class GEXCalculator:
         except: return float(pw)
 
 # ============================================================================
-# GERADOR DE SINAIS
+# GERADOR DE SINAIS (MESMO DO ORIGINAL)
 # ============================================================================
 
 @dataclass
@@ -677,14 +766,19 @@ if barstate.islast
 """
 
 # ============================================================================
-# INTERFACE PRINCIPAL
+# INTERFACE PRINCIPAL OTIMIZADA
 # ============================================================================
 
 def main():
-    if 'spx_data' not in st.session_state: st.session_state.spx_data = None
-    if 'last_update' not in st.session_state: st.session_state.last_update = None
+    # Inicializa session state
+    if 'spx_data' not in st.session_state: 
+        st.session_state.spx_data = None
+    if 'last_update' not in st.session_state: 
+        st.session_state.last_update = None
+    if 'error_message' not in st.session_state:
+        st.session_state.error_message = None
     
-    # --- CABEÇALHO ---
+    # Header
     status_html = "<span style='color:#00FFAA'>● ONLINE</span>" if st.session_state.spx_data else "<span style='color:#FFCC00'>● STANDBY</span>"
     time_html = st.session_state.last_update or '--:--:--'
     
@@ -701,16 +795,21 @@ def main():
 </div>
 """, unsafe_allow_html=True)
     
-    # --- DADOS DE MERCADO ---
-    with st.spinner("📡 Sincronizando S&P 500..."):
-        market_data = fetch_yf_data(("^VIX", "^VIX9D", "ES=F"))
-        spx_data = get_spx_analysis()
+    # Busca dados de mercado (sempre tenta)
+    with st.spinner("📡 Sincronizando dados de mercado..."):
+        try:
+            market_data = fetch_yf_data(("^VIX", "^VIX9D", "ES=F"))
+            spx_data = get_spx_analysis()
+        except Exception as e:
+            logger.error(f"Erro ao buscar dados: {e}")
+            market_data = {"^VIX": None, "^VIX9D": None, "ES=F": None}
+            spx_data = {}
     
     vix_val = market_data.get("^VIX")
     vix9d_val = market_data.get("^VIX9D")
     es_fut = market_data.get("ES=F")
     
-    # --- SIDEBAR ---
+    # Sidebar
     with st.sidebar:
         st.header("⚙️ Configurações")
         range_pct = st.slider("Range Gráfico (%):", 1, 10, 3)
@@ -731,7 +830,7 @@ def main():
         
         st.divider()
         
-        # === EXPORTAÇÃO PARA MT5 ===
+        # Exportação para MT5 (só funciona local)
         st.markdown("### 📤 EXPORTAR PARA MT5")
         st.caption("Gera arquivo CSV para importar níveis no MetaTrader 5")
         
@@ -748,25 +847,35 @@ def main():
                 st.warning("⚠️ Processe a matriz primeiro!")
         
         st.divider()
-        st.caption("v5.3.0-SPX-MT5 • Yahoo Finance • Sem bloqueios")
-        
-    # --- BOTÃO PRINCIPAL ---
+        st.caption("v5.3.0-Cloud • Yahoo Finance • Streamlit Cloud")
+    
+    # Botão principal
     data_to_use = st.session_state.spx_data
     is_live = True
     
     if st.button("🚀 PROCESSAR MATRIZ INSTITUCIONAL (S&P 500)", use_container_width=True, type="primary"):
-        with st.spinner("🔍 Buscando dados S&P 500..."):
-            fetcher = SPXDataFetcher()
-            new_data = fetcher.fetch_institutional_data("SPY")
-            if new_data:
-                data_to_use = new_data
-                st.session_state.spx_data = new_data
-                st.session_state.last_update = datetime.now().strftime("%H:%M:%S")
-                st.rerun()
-            else:
-                st.error("❌ Falha ao buscar dados. Tente em 30 segundos.")
+        with st.spinner("🔍 Buscando dados S&P 500 (isso pode levar alguns segundos)..."):
+            try:
+                fetcher = SPXDataFetcher()
+                new_data = fetcher.fetch_institutional_data("SPY")
+                
+                if new_data:
+                    data_to_use = new_data
+                    st.session_state.spx_data = new_data
+                    st.session_state.last_update = datetime.now().strftime("%H:%M:%S")
+                    st.session_state.error_message = None
+                    st.rerun()
+                else:
+                    st.session_state.error_message = "Não foi possível buscar dados da CBOE. Tente novamente em 1-2 minutos."
+                    st.error("❌ Falha ao buscar dados. O Yahoo Finance pode estar bloqueando temporariamente.")
+                    st.info("💡 Dica: Aguarde 1-2 minutos e tente novamente. Se persistir, use localmente.")
+                    
+            except Exception as e:
+                logger.error(f"Erro ao processar: {e}")
+                st.session_state.error_message = f"Erro: {str(e)}"
+                st.error("❌ Erro ao processar dados. Verifique os logs.")
 
-    # --- PROCESSAMENTO ---
+    # Processamento
     if not data_to_use:
         is_live = False
         spot = 6700.0
@@ -806,7 +915,7 @@ def main():
         calculator = GEXCalculator(spot)
         levels = calculator.calculate_gex_levels(df)
 
-    # --- BASIS/MT5 ---
+    # Basis/MT5
     if usar_mt5 and mt5_price > 0:
         es_real = mt5_price
         basis = mt5_price - spot
@@ -827,14 +936,10 @@ def main():
     def adj(val): return float(val) + basis
     levels_adj = {k: adj(v) for k, v in levels.items()}
     
-    # ========================================================================
-    # RENDERIZAÇÃO
-    # ========================================================================
+    # Renderização
+    col1, col2, col3 = st.columns([1, 1, 2.5])
     
-    # ROW 1: ES, VIX e PLAYBOOK
-    top_col1, top_col2, top_col3 = st.columns([1, 1, 2.5])
-    
-    with top_col1:
+    with col1:
         es_price = spx_data.get('price', 0) if spx_data else 0
         es_change = spx_data.get('change_pct', 0) if spx_data else 0
         color_es = "#00FFAA" if es_change > 0 else "#ff6b6b"
@@ -846,7 +951,7 @@ def main():
 </div>
 """, unsafe_allow_html=True)
         
-    with top_col2:
+    with col2:
         vix_color = "#ff6b6b" if (vix_val and vix_val > 20) else "#00FFAA"
         v9 = vix9d_val if vix9d_val else 0
         v = vix_val if vix_val else 0
@@ -857,14 +962,15 @@ def main():
 <div style="font-size:12px; color:#b0b8c8; margin-top: 5px;">VIX9D: {v9:.2f}</div>
 </div>
 """, unsafe_allow_html=True)
-        
-    with top_col3:
+
+    with col3:
         signal_gen = SignalGenerator(spot, basis, levels, spx_data)
-        if vix_val and vix9d_val: signal_gen.add_vix_data(vix_val, vix9d_val)
+        if vix_val and vix9d_val: 
+            signal_gen.add_vix_data(vix_val, vix9d_val)
         signal = signal_gen.generate()
         st.markdown(signal.to_html(), unsafe_allow_html=True)
 
-    # ROW 2: PAINEL DE CÓPIA (5 COLUNAS COM C4)
+    # Painel de cópia
     st.markdown("<h3 style='margin-top: 20px; font-size: 16px; color: #FFFFFF; font-weight: 600;'><span style='color:#00D4FF;'>📋 NÍVEIS PARA COPIAR (MT5):</span> Clique no ícone para copiar</h3>", unsafe_allow_html=True)
     
     cp_col1, cp_col2, cp_col3, cp_col4, cp_col5 = st.columns(5)
@@ -904,7 +1010,7 @@ def main():
         st.caption("Gamma Flip")
         st.code(f"{levels_adj.get('gamma_flip', levels_adj['zg']):.2f}", language=None)
 
-    # ROW 3: Gráfico
+    # Gráfico
     st.markdown("<br>", unsafe_allow_html=True)
     st.subheader("📊 Gamma Exposure - S&P 500")
     
@@ -933,7 +1039,7 @@ def main():
     )
     st.altair_chart(chart + rules, use_container_width=True)
 
-    # ROW 4: Pine Script
+    # Pine Script
     with st.expander("🖥️ PINE SCRIPT (TradingView)"):
         pine_code = generate_pine_script(levels, basis, datetime.now())
         st.code(pine_code, language="pine")
@@ -945,7 +1051,7 @@ def main():
     live_status = "ONLINE" if is_live else "STANDBY"
     st.markdown(f"""
 <div style="text-align:center; font-size:11px; color:#5a6478; font-family:JetBrains Mono; text-transform: uppercase;">
-GEX ULTRA ELITE PRO v5.3 | Status: {live_status} | MT5 Export: {mt5_status} | S&P 500 / ES Futures
+GEX ULTRA ELITE PRO v5.3-Cloud | Status: {live_status} | MT5 Export: {mt5_status} | S&P 500 / ES Futures
 </div>
 """, unsafe_allow_html=True)
 
